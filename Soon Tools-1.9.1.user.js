@@ -84,8 +84,6 @@
 
   // "tab"      = exact text in fishtank's room tab buttons
   // "streamKey" = partial match against stream name from the API (case-insensitive)
-  // "tab"      = exact text in fishtank's room tab buttons
-  // "streamKey" = partial match against stream name from the API (case-insensitive)
   const ROOMS = [
     // ── DOWNSTAIRS ─────────────────────────────────────────────────────────
     { id: 'GLASS',  label: 'Glass Room',   tab: 'Glassroom',   floor: 'down', streamKey: 'glass'        },
@@ -315,7 +313,8 @@
   };
 
   // Colours for active / offline / hover states
-  const FP_FILL_DEFAULT  = '#f0ede8';
+  // FP_FILL_DEFAULT is reserved for future use
+  // const FP_FILL_DEFAULT  = '#f0ede8';
   const FP_FILL_ACTIVE   = '#ffe8d6'; // warm orange tint — matches fishtank primary
   const FP_FILL_OFFLINE  = '#d8d5d0';
   const FP_FILL_HOVER    = '#f5efea';
@@ -471,6 +470,25 @@
     fpMapEl.innerHTML = '';
     fpMapEl.appendChild(fpBuildSVG());
     if (fpBuildLabelsRef) fpBuildLabelsRef();
+  }
+
+  // Finds fishtank's room-tab-bar container (the div holding the camera-select buttons)
+  function fpFindTabBar() {
+    // fishtank renders a grid of room buttons — look for a div with grid-cols-5 or grid-cols-4
+    const grid = document.querySelector('div.grid-cols-5, div.grid-cols-4');
+    if (grid) return grid;
+    // Fallback: find a div that directly contains buttons matching known room tab names
+    const allDivs = document.querySelectorAll('div');
+    for (const div of allDivs) {
+      const btns = div.querySelectorAll(':scope > button');
+      if (btns.length < 3) continue;
+      let matches = 0;
+      for (const btn of btns) {
+        if (ROOMS.some(r => r.tab && btn.textContent.trim() === r.tab)) matches++;
+      }
+      if (matches >= 3) return div;
+    }
+    return null;
   }
 
   function fpInject() {
@@ -722,6 +740,10 @@
   let previewUrl = null, previewClipId = null; // previewUrl = MP4 for download
   let wsDetectedId = null;
   let clipInjected = false;
+  // Called by clipWatchPopover to signal bg poller a new clip is coming
+  let _bgResetBaseline = null;
+  // Direct clip ID from XHR intercept — most reliable source
+  let _interceptedClipId = null;
 
   // ── Called from floorplan when room is selected ────────────────────────────
   // Finds the stream matching this room and applies it to the clip tool
@@ -897,6 +919,7 @@
                     if (pb) { pb.classList.remove('collapsed'); pb.style.maxHeight = '600px'; }
                     document.querySelector('#ftc-preview-chevron')?.classList.add('open');
                     const vid = document.querySelector('#ftc-video');
+                    const _fetchHlsUrl = data.playbackId ? getClipVideoUrl(data) : null;
                     if (vid && _fetchHlsUrl) { if (vid._hls) { vid._hls.destroy(); vid._hls = null; } playClipInVideo(vid, _fetchHlsUrl); }
                     const clipBody = document.querySelector('#ftc-clip-body');
                     if (clipBody) { clipBody.classList.remove('collapsed'); clipBody.style.maxHeight = '600px'; }
@@ -1548,11 +1571,6 @@
     if (p) p.style.display = type==='busy' ? 'block' : 'none';
   }
 
-  // Called by clipWatchPopover to signal bg poller a new clip is coming
-  let _bgResetBaseline = null;
-  // Direct clip ID from XHR intercept — most reliable source
-  let _interceptedClipId = null;
-
   function clipWatchPopover() {
     // Primary method: intercept Fishtank's SPA navigation after clip save.
     // When a clip is saved, Fishtank navigates to /clips/{id}?back=true — we grab the ID
@@ -1655,6 +1673,7 @@
   // Clips use mistserver with UUID playbackIds
   // Pattern observed: https://streams-c.fishtank.live/vod/{playbackId}/index.m3u8
   // or the clip embed URL pattern
+  // Note: not called directly by the script — available for future use or debugging
   function getClipUrl(clip) {
     return `https://www.fishtank.live/clips/${clip.id}`;
   }
@@ -1743,17 +1762,6 @@
       }, 500);
     });
     removalObs.observe(document.body, { childList: true, subtree: true });
-
-    // SPA navigation
-    const _push = history.pushState.bind(history);
-    history.pushState = function (...args) {
-      _push(...args);
-      // On SPA nav: only re-inject if our elements are gone from the DOM
-      setTimeout(() => {
-        if (!document.getElementById('ftfp-map'))  { fpInjected = false;   fpInject(); }
-        if (!document.getElementById('ftc-root'))  { clipInjected = false; clipInjectIntoColumn(); }
-      }, 2500);
-    };
 
     console.log('[SOON] Soon Tools v1.9.1 ready');
   }
