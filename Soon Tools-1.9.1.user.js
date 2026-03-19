@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Tools
 // @namespace    https://fishtank.news
-// @version      1.9.1
+// @version      1.9.2
 // @description  Floorplan room switcher + clip & post to X — fishtank.news | soon tools
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -622,14 +622,14 @@
         btn.style.cssText = [
           'position:absolute',
           `left:${l}%`, `top:${t}%`, `width:${w}%`, `height:${h}%`,
-          `background:${isSub ? 'rgba(0,0,0,0.06)' : 'transparent'}`,
+          `background:${isActive ? 'rgba(255,232,214,0.45)' : isSub ? 'rgba(0,0,0,0.06)' : 'transparent'}`,
           `border:${isSub ? '1px solid rgba(0,0,0,0.25)' : 'none'}`,
           'display:flex',
           'align-items:center',
           'justify-content:center',
           'text-align:center',
           `font-family:${T.fontSecondary || 'highway-gothic,sans-serif'}`,
-          `font-size:${isSub ? 'clamp(5px,1.2vw,9px)' : 'clamp(7px,1.8vw,13px)'}`,
+          `font-size:${isSub ? 'clamp(4px,0.9vw,7px)' : 'clamp(5px,1.2vw,9px)'}`,
           'font-weight:700',
           'letter-spacing:0.06em',
           'text-transform:uppercase',
@@ -645,10 +645,16 @@
         ].filter(Boolean).join(';');
         if (!isOff) {
           btn.addEventListener('mouseenter', () => {
-            if (fpActiveRoom !== id) btn.style.color = T.primary;
+            if (fpActiveRoom !== id) {
+              btn.style.color = T.primary;
+              btn.style.background = 'rgba(245,239,234,0.55)';
+            }
           });
           btn.addEventListener('mouseleave', () => {
-            if (fpActiveRoom !== id) btn.style.color = 'rgba(0,0,0,0.65)';
+            if (fpActiveRoom !== id) {
+              btn.style.color = 'rgba(0,0,0,0.65)';
+              btn.style.background = isSub ? 'rgba(0,0,0,0.06)' : 'transparent';
+            }
           });
           btn.addEventListener('click', () => onRoomSelected(id));
         }
