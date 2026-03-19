@@ -352,9 +352,9 @@
     if (isDown) {
       // Exact coords from drawio XML (offset x-1620, y-80)
       addFill('GLASS',  310,  10, 230, 290, offlineRooms.has('GLASS'));
-      addFill('FOYER',  542,  10, 259, 300, offlineRooms.has('FOYER'));
-      addFill('MARKET', 711,  10, 189, 300, offlineRooms.has('MARKET'));
-      addFill('MALT',   850, 169,  60,  30, offlineRooms.has('MALT')); // Market Alt sub-zone
+      addFill('FOYER',  542,  10, 259, 188, offlineRooms.has('FOYER'));
+      addFill('MARKET', 711,  10, 130, 300, offlineRooms.has('MARKET'));
+      addFill('MALT',   850, 169,  90,  50, offlineRooms.has('MALT')); // Market Alt sub-zone
       addFill('JACUZ', 1211, 211,  89,  99, offlineRooms.has('JACUZ'));
       addFill('HALLD',  540, 300, 560,  80, offlineRooms.has('HALLD'));
       addFill('DINING',  10, 370, 290, 220, offlineRooms.has('DINING'));
@@ -364,7 +364,7 @@
       addFill('BALT',   670, 520,  80,  70, offlineRooms.has('BALT')); // Bar Alt sub-zone
       addFill('CLOS',  1050, 480,  50,  70, offlineRooms.has('CLOS'));
       addFill('DORM',  1100, 310, 200, 280, offlineRooms.has('DORM'));
-      addFill('DALT',  1100, 310,  80,  70, offlineRooms.has('DALT')); // Dorm Alt sub-zone
+      addFill('DALT',  1100, 450,  80,  70, offlineRooms.has('DALT')); // Dorm Alt sub-zone
     } else {
       addFill('CONF',   260, 800,  80,  87, offlineRooms.has('CONF'));
       addFill('CORR',   260, 887,  80,  83, offlineRooms.has('CONF'));
@@ -382,7 +382,7 @@
         DINING:{x:155,y:480}, KITCH:{x:420,y:450},  BAR:{x:705,y:485},
         CLOS: {x:1075,y:515}, DORM:{x:1200,y:450},
         BPTZ: {x:585,y:485},  BALT:{x:710,y:555},
-        DALT: {x:1140,y:345}, MALT:{x:880,y:184},
+        DALT: {x:1140, y:490}, MALT:{x:880,y:184},
         CONF:{x:305,y:840},   JNDL:{x:430,y:840},
         HALLU:{x:560,y:920},  BALC:{x:510,y:999},
       };
@@ -418,9 +418,9 @@
 
     if (isDown) {
       addHit('GLASS',  310,  10, 230, 290);
-      addHit('FOYER',  542,  10, 259, 300);
-      addHit('MARKET', 711,  10, 189, 300);
-      addHit('MALT',   850, 169,  60,  30);
+      addHit('FOYER',  542,  10, 259, 188);
+      addHit('MARKET', 711,  10, 130, 300);
+      addHit('MALT',   850, 169,  90,  50);
       addHit('JACUZ', 1211, 211,  89,  99);
       addHit('HALLD',  540, 300, 560,  80);
       addHit('DINING',  10, 370, 290, 220);
@@ -430,7 +430,7 @@
       addHit('BALT',   670, 520,  80,  70);
       addHit('CLOS',  1050, 480,  50,  70);
       addHit('DORM',  1100, 310, 200, 280);
-      addHit('DALT',  1100, 310,  80,  70);
+      addHit('DALT',  1100, 450,  80,  70);
     } else {
       addHit('CONF',   260, 800,  80, 170);
       addHit('JNDL',   400, 803, 100,  87);
@@ -584,23 +584,23 @@
       // Sub-zones: [id, label, l%, t%, w%, h%, isSub]
       // (isSub=true renders with border + smaller text)
       ['GLASS',  'GLASS ROOM',   23.6,  1.6, 17.5, 46.8],
-      ['FOYER',  'FOYER',        41.2,  1.6, 19.7, 48.4],
-      ['MARKET', 'MARKET',       54.1,  1.6, 14.4, 48.4],
-      ['JACUZ',  'JACUZ',        92.2, 34.0,  6.8, 16.0],
+      ['FOYER',  'FOYER',        41.2,  1.6, 19.7, 30.3],
+      ['MARKET', 'MARKET',       54.1,  1.6,  9.9, 48.4],
+      ['JACUZ',  'JAC',          92.2, 34.0,  6.8, 16.0],
       ['HALLD',  'HALLWAY DOWN', 41.1, 48.4, 42.6, 12.9],
       ['DINING', 'DINING',        0.8, 59.7, 22.1, 35.5],
       ['KITCH',  'KITCHEN',      22.8, 50.0, 18.3, 45.2],
       ['BAR',    'BAR',          41.9, 61.3, 23.6, 33.9],
-      ['CLOS',   'CLOSET',       79.9, 77.4,  3.8, 11.3],
+      ['CLOS',   'CLO',          79.9, 77.4,  3.8, 11.3],
       ['BPTZ',   'PTZ',           41.9, 72.7,  5.3, 11.0, true],
       ['BALT',   'ALT',           51.0, 83.9,  6.1, 11.3, true],
-      ['DALT',   'ALT',           83.7, 50.0,  6.1, 11.3, true],
-      ['MALT',   'ALT',           64.7, 27.3,  4.6,  4.8, true],
+      ['DALT',   'ALT',           83.7, 72.5,  6.1, 11.3, true],
+      ['MALT',   'ALT',           64.7, 27.3,  6.8,  8.1, true],
       ['DORM',   'DORM',         83.7, 50.0, 15.2, 45.2],
     ];
     const LABELS_UP = [
-      ['CONF',  'CONFES',      2.8, 16.0, 11.0, 22.1],
-      ['CORR',  'CORRIDOR',    2.8, 38.2, 11.0, 21.1],
+      ['CONF',  'CON',         2.8, 16.0, 11.0, 22.1],
+      ['CORR',  'COR',         2.8, 38.2, 11.0, 21.1],
       ['JNDL',  'JUNGLE',     22.0, 16.8, 13.8, 22.1],
       ['HALLU', 'HALLWAY UP', 13.8, 38.9, 70.2, 20.9],
       ['BALC',  'BALCONY',    41.2, 56.7, 30.4, 17.0],
