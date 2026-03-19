@@ -240,7 +240,7 @@
   function fpBuildSVG() {
     const NS = 'http://www.w3.org/2000/svg';
     const isDown = fpFloor === 'down';
-    const VB = isDown ? '0 0 1314 620' : '240 737 726 393';
+    const VB = isDown ? '0 0 1314 620' : '250 760 781 369';
 
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('viewBox', VB);
@@ -286,10 +286,10 @@
       addFill('DALT',  1100, 450,  80,  70, offlineRooms.has('DALT')); // Dorm Alt sub-zone
     } else {
       addFill('CONF',   260, 800,  80,  87, offlineRooms.has('CONF'));
-      addFill('CORR',   260, 887,  80,  83, offlineRooms.has('CONF'));
+      addFill('CORR',   260, 887,  80,  83, offlineRooms.has('CORR'));
       addFill('JNDL',   400, 803, 100,  87, offlineRooms.has('JNDL'));
-      addFill('HALLU',  340, 890, 510,  82, offlineRooms.has('HALLU'));
-      addFill('BALC',   539, 960, 221,  67, offlineRooms.has('BALC'));
+      addFill('HALLU',  341, 890, 479,  82, offlineRooms.has('HALLU'));
+      addFill('BALC',   630, 892, 100,  80, offlineRooms.has('BALC'));
     }
 
     // Active dot — uses label center positions from the SVG (ground truth)
@@ -302,8 +302,8 @@
         CLOS: {x:1075,y:515}, DORM:{x:1200,y:450},
         BPTZ: {x:585,y:485},  BALT:{x:710,y:555},
         DALT: {x:1140, y:490}, MALT:{x:880,y:180},
-        CONF:{x:305,y:840},   CORR:{x:300,y:928},   JNDL:{x:430,y:840},
-        HALLU:{x:560,y:920},  BALC:{x:510,y:999},
+        CONF:{x:300,y:843},   CORR:{x:300,y:928},   JNDL:{x:450,y:846},
+        HALLU:{x:580,y:931},  BALC:{x:680,y:932},
       };
       const downRooms = ['GLASS','FOYER','MARKET','JACUZ','HALLD','DINING','KITCH','BAR','CLOS','DORM','BPTZ','BALT','DALT','MALT'];
       const upRooms   = ['CONF','CORR','JNDL','HALLU','BALC'];
@@ -351,11 +351,11 @@
       addHit('DORM',  1100, 310, 200, 280);
       addHit('DALT',  1100, 450,  80,  70);
     } else {
-      addHit('CONF',   260, 800,  80, 170);
+      addHit('CONF',   260, 800,  80,  87);
       addHit('CORR',   260, 887,  80,  83);
       addHit('JNDL',   400, 803, 100,  87);
-      addHit('HALLU',  340, 890, 510,  82);
-      addHit('BALC',   539, 960, 221,  67);
+      addHit('HALLU',  341, 890, 479,  82);
+      addHit('BALC',   630, 892, 100,  80);
     }
 
     // Stairs — toggle floor
@@ -377,8 +377,8 @@
       addStair(489, 198, 216, 107);
       addStair( 10, 311, 290,  59);
     } else {
-      addStair(503, 828, 250, 59);
-      addStair(254, 975, 280, 59);
+      addStair(602, 760, 59, 218); // big stairwell — clipped to viewBox top
+      addStair(264, 963,  59,  87);
     }
 
     return svg;
@@ -523,11 +523,13 @@
       ['_STRS2', 'STRS',          0.8, 50.2, 22.1,  9.5, true],
     ];
     const LABELS_UP = [
-      ['CONF',  'CON',         2.8, 16.0, 11.0, 22.1],
-      ['CORR',  'CORR',        2.8, 38.2, 11.0, 21.3],
-      ['JNDL',  'JUNGLE',     22.0, 16.8, 13.8, 22.1],
-      ['HALLU', 'HALLWAY UP', 13.8, 38.9, 70.2, 20.9],
-      ['BALC',  'BALCONY',    41.2, 56.7, 30.4, 17.0],
+      ['CONF',  'CON',         1.3, 10.8, 10.2, 23.6],
+      ['CORR',  'CORR',        1.3, 34.4, 10.2, 22.5],
+      ['JNDL',  'JUNGLE',     19.2, 11.7, 12.8, 23.6],
+      ['HALLU', 'HALLWAY UP', 11.7, 35.2, 61.3, 22.2],
+      ['BALC',  'BALCONY',    48.7, 35.8, 12.8, 21.7],
+      ['_STRS1','STRS',       45.1,  0.0,  7.6, 59.1, true], // big stairwell column
+      ['_STRS2','STRS',        1.8, 55.0,  7.6, 23.6, true], // small stair bottom-left
     ];
 
     function fpBuildLabels() {
