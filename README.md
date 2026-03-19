@@ -1,84 +1,116 @@
-# 🐟 Soon Tools
+# Soon Tools 🐟
 
-> A Tampermonkey userscript for **[fishtank.live](https://fishtank.live)** — floorplan room switcher, clip & post to X, and more.
-
----
-
-## ✨ Features
-
-- 🗺️ **Floorplan Room Switcher** — interactive floorplan overlay that lets you switch rooms on fishtank.live
-- 📎 **Clip & Post to X** — clip moments and share them directly to X (Twitter)
-- 🎨 **Theme-aware** — inherits fishtank.live's CSS variables for a native look & feel
-- 🔄 **Auto-Update** — always stay on the latest version via Tampermonkey's built-in updater
+> A Tampermonkey userscript for [fishtank.live](https://www.fishtank.live) — adds a **floorplan room switcher** and a **clip & post to X** feature, built by [fishtank.news](https://fishtank.news).
 
 ---
 
-## 📦 Installation
+## ⚡ One-Click Install
 
-### Requirements
+> **Requires [Tampermonkey](https://www.tampermonkey.net/) to be installed in your browser first.**
 
-- A Chromium-based browser (Chrome, Edge, Brave, etc.) or Firefox
-- [Tampermonkey](https://www.tampermonkey.net/) browser extension installed
+[![Install Soon Tools](https://img.shields.io/badge/Install%20Soon%20Tools-v1.9.3-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/Soon%20Tools-1.9.1.user.js)
 
-### Step-by-step
+Click the button above — Tampermonkey will open an install dialog automatically.
 
-1. **Install Tampermonkey** if you haven't already:
-   - [Chrome Web Store](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
-   - [Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/)
-   - [Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd)
+---
 
-2. **Click the install link below** to open the script directly in Tampermonkey:
+## 📦 Installation (Step-by-Step)
 
-   ### 👉 [Install Soon Tools](https://raw.githubusercontent.com/michaety/soontools/main/Soon%20Tools-1.9.1.user.js)
+### 1. Install Tampermonkey
 
-3. Tampermonkey will open an installation dialog — click **"Install"**.
+Install the Tampermonkey browser extension for your browser:
 
-4. Visit [fishtank.live](https://fishtank.live) and the script will activate automatically.
+| Browser | Link |
+|---------|------|
+| Chrome | [Chrome Web Store](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) |
+| Firefox | [Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/) |
+| Edge | [Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd) |
+| Safari | [App Store](https://apps.apple.com/us/app/tampermonkey/id1482490089) |
+
+### 2. Install the Script
+
+**Option A — One-click (recommended):**
+
+Click the install link below, Tampermonkey will prompt you to confirm:
+
+👉 [Install Soon Tools](https://raw.githubusercontent.com/michaety/soontools/main/Soon%20Tools-1.9.1.user.js)
+
+**Option B — Manual:**
+
+1. Open Tampermonkey → click **Create a new script**
+2. Delete the default content
+3. Copy and paste the raw contents from [`Soon Tools-1.9.1.user.js`](https://raw.githubusercontent.com/michaety/soontools/main/Soon%20Tools-1.9.1.user.js)
+4. Press **Ctrl+S** (or **Cmd+S**) to save
+
+### 3. Use It
+
+Navigate to [fishtank.live](https://www.fishtank.live) — the Soon Tools UI will appear automatically.
 
 ---
 
 ## 🔄 Auto-Update
 
-Soon Tools is configured to **auto-update** through Tampermonkey. Every time Tampermonkey performs its periodic update check, it will compare the version in your installed script against the latest version on this repository.
-
-The script's metadata block includes:
+Soon Tools is configured for **automatic updates** via Tampermonkey. The script's metadata block includes:
 
 ```javascript
 // @updateURL    https://raw.githubusercontent.com/michaety/soontools/main/Soon%20Tools-1.9.1.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaety/soontools/main/Soon%20Tools-1.9.1.user.js
 ```
 
-### How to configure update checks in Tampermonkey
+- **`@updateURL`** — Tampermonkey checks this URL periodically for a newer `@version` value.
+- **`@downloadURL`** — If an update is detected, Tampermonkey downloads the new script from this URL.
+
+### Configure Update Frequency
+
+By default, Tampermonkey checks for updates every **24 hours**. To change this:
 
 1. Click the **Tampermonkey icon** in your browser toolbar
-2. Go to **Dashboard → Settings**
-3. Under **"Script Update"**, set **"Check Interval"** to your preference (e.g. every day)
-4. Make sure **"Check for script updates"** is enabled
+2. Go to **Dashboard** → **Settings**
+3. Scroll to **Script Update** section
+4. Set **Check Interval** to your preference (e.g., every hour, every day, never)
 
-> Updates are checked automatically in the background. You'll get a notification when a new version is available.
+### Manually Check for Updates
 
-### Manual update check
-
-1. Open the **Tampermonkey Dashboard**
-2. Find **"Soon Tools"** in your scripts list
-3. Click the **"Check for userscript updates"** button (circular arrow icon)
-
----
-
-## 🛠️ Development
-
-The userscript file follows the standard `.user.js` naming convention and includes a full Tampermonkey metadata block at the top. To modify it locally:
-
-1. Fork this repository
-2. Edit `Soon Tools-1.9.1.user.js`
-3. In Tampermonkey, you can point your `@updateURL` / `@downloadURL` to your fork's raw URL for testing
+1. Click the **Tampermonkey icon** → **Dashboard**
+2. Find **Soon Tools** in the list
+3. Click the **name** to open script details
+4. Click **Check for Updates** (or look for the refresh icon)
 
 ---
 
-## 📄 License
+## ✨ Features
 
-This project is provided as-is. See the script header for author and namespace info.
+- 🗺️ **Floorplan Room Switcher** — navigate between fishtank.live rooms using an interactive floorplan overlay
+- 🎬 **Clip & Post to X** — clip moments from the stream and share directly to X (Twitter)
+- 🎨 **Theme-aware** — inherits fishtank.live's CSS custom properties for seamless styling
 
 ---
 
-*Built for [fishtank.live](https://fishtank.live) fans 🐠*
+## 🛠️ Compatibility
+
+| Item | Detail |
+|------|--------|
+| Site | `https://fishtank.live/*` and `https://www.fishtank.live/*` |
+| Script Manager | Tampermonkey (recommended), Violentmonkey |
+| Browsers | Chrome, Firefox, Edge, Safari |
+| Current Version | 1.9.3 |
+
+---
+
+## 📁 Repository
+
+| File | Description |
+|------|-------------|
+| [`Soon Tools-1.9.1.user.js`](./Soon%20Tools-1.9.1.user.js) | Main userscript |
+| [`fishtank-floorplan.drawio.svg`](./fishtank-floorplan.drawio.svg) | Floorplan diagram (SVG) |
+| [`fishtank-floorplan.drawio.xml`](./fishtank-floorplan.drawio.xml) | Floorplan diagram source (draw.io XML) |
+
+---
+
+## 📝 License
+
+This project is provided as-is for use with [fishtank.live](https://www.fishtank.live).
+
+---
+
+*Made with ❤️ by [fishtank.news](https://fishtank.news)*
