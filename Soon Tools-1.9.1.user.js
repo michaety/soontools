@@ -98,7 +98,7 @@
     { id: 'DORM',   label: 'Dorm',         tab: 'Dorm',         floor: 'down', streamKey: 'dorm'         },
     // ── UPSTAIRS ───────────────────────────────────────────────────────────
     { id: 'CONF',   label: 'Confessional', tab: 'Confessional', floor: 'up',   streamKey: 'confess'      },
-    { id: 'JNDL',   label: 'Jundle Room',  tab: 'Jundle Room',  floor: 'up',   streamKey: 'jundle'       },
+    { id: 'JNDL',   label: 'Jungle Room',  tab: 'Jungle Room',  floor: 'up',   streamKey: 'jungle'       },
     { id: 'HALLU',  label: 'Hallway Up',   tab: 'Hallway Up',   floor: 'up',   streamKey: 'hallway up'   },
     { id: 'BALC',   label: 'Balcony',      tab: 'Balcony',      floor: 'up',   streamKey: 'balcony'      },
     // ── MISC (no map position) ─────────────────────────────────────────────
@@ -338,6 +338,7 @@
       x:0, y:0, width:1314, height:1038,
       preserveAspectRatio:'xMinYMin meet'
     }));
+    svg.lastChild.style.pointerEvents = 'none'; // background image should not capture clicks
 
     // ── ROOM FILLS ───────────────────────────────────────────────────────────
     function addFill(id, x, y, w, h, isOffline) {
@@ -352,7 +353,7 @@
     if (isDown) {
       // Exact coords from drawio XML (offset x-1620, y-80)
       addFill('GLASS',  310,  10, 230, 290, offlineRooms.has('GLASS'));
-      addFill('FOYER',  542,  10, 259, 188, offlineRooms.has('FOYER'));
+      addFill('FOYER',  542,  10, 259, 295, offlineRooms.has('FOYER'));
       addFill('MARKET', 711,  10, 130, 300, offlineRooms.has('MARKET'));
       addFill('MALT',   850, 169,  90,  50, offlineRooms.has('MALT')); // Market Alt sub-zone
       addFill('JACUZ', 1211, 211,  89,  99, offlineRooms.has('JACUZ'));
@@ -418,7 +419,7 @@
 
     if (isDown) {
       addHit('GLASS',  310,  10, 230, 290);
-      addHit('FOYER',  542,  10, 259, 188);
+      addHit('FOYER',  542,  10, 259, 295);
       addHit('MARKET', 711,  10, 130, 300);
       addHit('MALT',   850, 169,  90,  50);
       addHit('JACUZ', 1211, 211,  89,  99);
@@ -524,8 +525,10 @@
     const toggleBtn = document.createElement('button');
     toggleBtn.className = 'ftc-hdr-btn';
     toggleBtn.textContent = 'TABS';
-    toggleBtn.addEventListener('mouseenter', () => { toggleBtn.style.borderColor='rgba(255,255,255,0.3)'; toggleBtn.style.color='#fff'; });
-    toggleBtn.addEventListener('mouseleave', () => { toggleBtn.style.borderColor='rgba(255,255,255,0.1)'; toggleBtn.style.color='rgba(255,255,255,0.3)'; });
+    toggleBtn.style.color = 'rgba(255,255,255,0.85)';
+    toggleBtn.style.borderColor = 'rgba(255,255,255,0.35)';
+    toggleBtn.addEventListener('mouseenter', () => { toggleBtn.style.borderColor='rgba(255,255,255,0.6)'; toggleBtn.style.color='#fff'; });
+    toggleBtn.addEventListener('mouseleave', () => { toggleBtn.style.borderColor='rgba(255,255,255,0.35)'; toggleBtn.style.color='rgba(255,255,255,0.85)'; });
     toggleBtn.addEventListener('click', () => {
       fpMapVisible = !fpMapVisible;
       if (fpMapVisible) {
@@ -584,8 +587,8 @@
       // Sub-zones: [id, label, l%, t%, w%, h%, isSub]
       // (isSub=true renders with border + smaller text)
       ['GLASS',  'GLASS ROOM',   23.6,  1.6, 17.5, 46.8],
-      ['FOYER',  'FOYER',        41.2,  1.6, 19.7, 30.3],
-      ['MARKET', 'MARKET',       54.1,  1.6,  9.9, 48.4],
+      ['FOYER',  'FOYER',        41.2,  1.6, 19.7, 47.6],
+      ['MARKET', 'MARKET',       54.1,  1.6,  9.9, 27.3],
       ['JACUZ',  'JAC',          92.2, 34.0,  6.8, 16.0],
       ['HALLD',  'HALLWAY DOWN', 41.1, 48.4, 42.6, 12.9],
       ['DINING', 'DINING',        0.8, 59.7, 22.1, 35.5],
@@ -594,13 +597,12 @@
       ['CLOS',   'CLO',          79.9, 77.4,  3.8, 11.3],
       ['BPTZ',   'PTZ',           41.9, 72.7,  5.3, 11.0, true],
       ['BALT',   'ALT',           51.0, 83.9,  6.1, 11.3, true],
-      ['DALT',   'ALT',           83.7, 72.5,  6.1, 11.3, true],
+      ['DALT',   'ALT',           84.0, 85.0,  5.8,  9.0, true],
       ['MALT',   'ALT',           64.7, 27.3,  6.8,  8.1, true],
       ['DORM',   'DORM',         83.7, 50.0, 15.2, 45.2],
     ];
     const LABELS_UP = [
-      ['CONF',  'CON',         2.8, 16.0, 11.0, 22.1],
-      ['CORR',  'COR',         2.8, 38.2, 11.0, 21.1],
+      ['CONF',  'CON',         2.8, 16.0, 11.0, 43.2],
       ['JNDL',  'JUNGLE',     22.0, 16.8, 13.8, 22.1],
       ['HALLU', 'HALLWAY UP', 13.8, 38.9, 70.2, 20.9],
       ['BALC',  'BALCONY',    41.2, 56.7, 30.4, 17.0],
@@ -641,6 +643,7 @@
           'transition:color 0.12s,background 0.12s',
           'white-space:normal',
           'word-break:break-word',
+          'overflow:hidden',
           isSub ? 'border-radius:2px' : '',
         ].filter(Boolean).join(';');
         if (!isOff) {
@@ -698,8 +701,6 @@
     const mapWrap = document.createElement('div');
     mapWrap.style.cssText = 'position:relative;width:100%;line-height:0;';
     fpMapWrap = mapWrap;
-    const svgEl = fpMapEl.querySelector('svg');
-    if (svgEl) svgEl.style.pointerEvents = 'none';
     mapWrap.appendChild(fpMapEl);
     mapWrap.appendChild(overlay);
     wrapper.appendChild(mapWrap);
@@ -708,18 +709,6 @@
     fpBuildLabelsRef = fpBuildLabels;
 
     fpContainer.parentElement.insertBefore(wrapper, fpContainer);
-
-    // Restore button inside their tab bar
-    const restoreBtn = document.createElement('button');
-    restoreBtn.textContent = '⊞ MAP';
-    restoreBtn.style.cssText = 'flex-shrink:0;background:color-mix(in srgb,var(--base-primary,#df4e1e) 15%,transparent);border:1px solid color-mix(in srgb,var(--base-primary,#df4e1e) 40%,transparent);border-radius:3px;color:var(--base-light,#dddec4);font-size:9px;font-family:var(--base-font-secondary,highway-gothic,sans-serif);letter-spacing:0.1em;padding:2px 6px;cursor:pointer;margin-left:auto;font-weight:700;';
-    restoreBtn.addEventListener('click', () => {
-      fpContainer.style.position='fixed'; fpContainer.style.left='-9999px'; fpContainer.style.top='0';
-      fpContainer.style.opacity='0'; fpContainer.style.pointerEvents='auto';
-      fpContainer.style.height='auto'; fpContainer.style.overflow='visible'; fpContainer.style.visibility='hidden';
-      fpMapWrap.style.display = fpMinimised ? 'none' : ''; fpMapVisible=true; toggleBtn.textContent='TABS';
-    });
-    fpContainer.appendChild(restoreBtn);
 
     // Clicking the stairs on the architectural map fires this event
     document.addEventListener('ftfp-go-upstairs', () => {
@@ -1769,7 +1758,7 @@
     });
     removalObs.observe(document.body, { childList: true, subtree: true });
 
-    console.log('[SOON] Soon Tools v1.9.1 ready');
+    console.log('[SOON] Soon Tools v1.9.2 ready');
   }
 
   if (document.readyState !== 'loading') init();
