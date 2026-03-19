@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Tools
 // @namespace    https://fishtank.news
-// @version      1.9.1
+// @version      1.9.2
 // @description  Floorplan room switcher + clip & post to X — fishtank.news | soon tools
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -82,8 +82,6 @@
   // ── FLOORPLAN ──────────────────────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // "tab"      = exact text in fishtank's room tab buttons
-  // "streamKey" = partial match against stream name from the API (case-insensitive)
   // "tab"      = exact text in fishtank's room tab buttons
   // "streamKey" = partial match against stream name from the API (case-insensitive)
   const ROOMS = [
@@ -297,25 +295,7 @@
   }
 
   // ── Architectural floorplan SVG ───────────────────────────────────────────
-  // Room fill IDs — used by fpRebuildSVG to highlight without full rebuild
-  // Maps ROOMS id → SVG fill rect element id(s)
-  const FP_FILL_MAP = {
-    GLASS:   ['ftfp-fill-GLASS'],
-    FOYER:   ['ftfp-fill-FOYER'],
-    HALLU:   ['ftfp-fill-FOYER'],
-    MARKET:  ['ftfp-fill-MARKET'],
-    JACUZ:   ['ftfp-fill-JACUZ'],
-    HALLD:   ['ftfp-fill-HALLD'],
-    DINING:  ['ftfp-fill-DINING'],
-    KITCH:   ['ftfp-fill-KITCH'],
-    DORM:    ['ftfp-fill-DORM'],
-    BAR:     ['ftfp-fill-KITCH'],
-    BARPTZ:  ['ftfp-fill-KITCH'],
-    // upstairs rooms handled by tab toggle
-  };
-
   // Colours for active / offline / hover states
-  const FP_FILL_DEFAULT  = '#f0ede8';
   const FP_FILL_ACTIVE   = '#ffe8d6'; // warm orange tint — matches fishtank primary
   const FP_FILL_OFFLINE  = '#d8d5d0';
   const FP_FILL_HOVER    = '#f5efea';
@@ -471,6 +451,31 @@
     fpMapEl.innerHTML = '';
     fpMapEl.appendChild(fpBuildSVG());
     if (fpBuildLabelsRef) fpBuildLabelsRef();
+  }
+
+  function fpFindTabBar() {
+    // Primary: find the camera grid and use its parent container
+    const grid = document.querySelector('div.grid-cols-5, div.grid-cols-4');
+    if (grid) {
+      // Walk up to find a flex-col container that holds the grid
+      let el = grid.parentElement;
+      for (let i = 0; i < 5 && el; i++) {
+        const cl = typeof el.className === 'string' ? el.className : '';
+        if (cl.includes('flex-col') || cl.includes('overflow')) return el;
+        el = el.parentElement;
+      }
+      return grid.parentElement;
+    }
+    // Fallback: find any flex-col h-full min-h-0 div containing room tab buttons
+    for (const el of document.querySelectorAll('div')) {
+      const cl = typeof el.className === 'string' ? el.className : '';
+      if (!cl.includes('flex-col') || !cl.includes('h-full') || !cl.includes('min-h-0')) continue;
+      const btns = el.querySelectorAll('button');
+      for (const btn of btns) {
+        if (ROOMS.some(r => btn.textContent.trim() === r.tab)) return el;
+      }
+    }
+    return null;
   }
 
   function fpInject() {
@@ -897,6 +902,7 @@
                     if (pb) { pb.classList.remove('collapsed'); pb.style.maxHeight = '600px'; }
                     document.querySelector('#ftc-preview-chevron')?.classList.add('open');
                     const vid = document.querySelector('#ftc-video');
+                    const _fetchHlsUrl = data.playbackId ? getClipVideoUrl(data) : null;
                     if (vid && _fetchHlsUrl) { if (vid._hls) { vid._hls.destroy(); vid._hls = null; } playClipInVideo(vid, _fetchHlsUrl); }
                     const clipBody = document.querySelector('#ftc-clip-body');
                     if (clipBody) { clipBody.classList.remove('collapsed'); clipBody.style.maxHeight = '600px'; }
@@ -1652,13 +1658,6 @@
   }
 
   // Build playback URL from clip data
-  // Clips use mistserver with UUID playbackIds
-  // Pattern observed: https://streams-c.fishtank.live/vod/{playbackId}/index.m3u8
-  // or the clip embed URL pattern
-  function getClipUrl(clip) {
-    return `https://www.fishtank.live/clips/${clip.id}`;
-  }
-
   // Returns the HLS stream URL for preview playback
   function getClipVideoUrl(clip) {
     const pbId = clip.playbackId;
@@ -1723,7 +1722,7 @@
       }
     }, true);
 
-      // Poll stream online/offline status — use their own button states as source of truth
+    // Poll stream online/offline status — use their own button states as source of truth
     fpCheckOfflineFromDOM();
     setInterval(fpCheckOfflineFromDOM, 3000); // check DOM every 3s (fast, no network)
     fpPollOfflineStatus();                    // also do thumbnail check every 15s
@@ -1755,7 +1754,7 @@
       }, 2500);
     };
 
-    console.log('[SOON] Soon Tools v1.9.1 ready');
+    console.log('[SOON] Soon Tools v1.9.2 ready');
   }
 
   if (document.readyState !== 'loading') init();
