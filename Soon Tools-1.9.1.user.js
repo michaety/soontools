@@ -98,6 +98,7 @@
     { id: 'DORM',   label: 'Dorm',         tab: 'Dorm',         floor: 'down', streamKey: 'dorm'         },
     // ── UPSTAIRS ───────────────────────────────────────────────────────────
     { id: 'CONF',   label: 'Confessional', tab: 'Confessional', floor: 'up',   streamKey: 'confess'      },
+    { id: 'CORR',   label: 'Corridor',     tab: 'Corridor',     floor: 'up',   streamKey: 'corridor'     },
     { id: 'JNDL',   label: 'Jungle Room',  tab: 'Jungle Room',  floor: 'up',   streamKey: 'jungle'       },
     { id: 'HALLU',  label: 'Hallway Up',   tab: 'Hallway Up',   floor: 'up',   streamKey: 'hallway up'   },
     { id: 'BALC',   label: 'Balcony',      tab: 'Balcony',      floor: 'up',   streamKey: 'balcony'      },
@@ -259,6 +260,13 @@
       }
     }
 
+    // Fallback: for alt-cam sub-zones, click the parent room tab
+    const PARENT = { BALT: 'BAR', BPTZ: 'BAR', DALT: 'DORM', MALT: 'MARKET' };
+    if (PARENT[roomId]) {
+      console.warn('[SOON] fpClickTab: alt cam tab not found, falling back to parent', PARENT[roomId]);
+      return fpClickTab(PARENT[roomId]);
+    }
+
     console.warn('[SOON] fpClickTab: no button found for', room.tab);
     return false;
   }
@@ -353,9 +361,9 @@
     if (isDown) {
       // Exact coords from drawio XML (offset x-1620, y-80)
       addFill('GLASS',  310,  10, 230, 290, offlineRooms.has('GLASS'));
-      addFill('FOYER',  542,  10, 259, 295, offlineRooms.has('FOYER'));
-      addFill('MARKET', 711,  10, 130, 300, offlineRooms.has('MARKET'));
-      addFill('MALT',   850, 169,  90,  50, offlineRooms.has('MALT')); // Market Alt sub-zone
+      addFill('FOYER',  542,  10, 258, 190, offlineRooms.has('FOYER'));
+      addFill('MARKET', 800,  10, 100,  90, offlineRooms.has('MARKET'));
+      addFill('MALT',   860, 162,  40,  37, offlineRooms.has('MALT')); // Market Alt sub-zone
       addFill('JACUZ', 1211, 211,  89,  99, offlineRooms.has('JACUZ'));
       addFill('HALLD',  540, 300, 560,  80, offlineRooms.has('HALLD'));
       addFill('DINING',  10, 370, 290, 220, offlineRooms.has('DINING'));
@@ -378,17 +386,17 @@
     if (fpActiveRoom) {
       const T = getTheme();
       const centres = {
-        GLASS:{x:425,y:155},  FOYER:{x:671,y:160},  MARKET:{x:805,y:160},
+        GLASS:{x:425,y:155},  FOYER:{x:671,y:160},  MARKET:{x:850,y: 55},
         JACUZ:{x:1255,y:260}, HALLD:{x:820,y:340},
         DINING:{x:155,y:480}, KITCH:{x:420,y:450},  BAR:{x:705,y:485},
         CLOS: {x:1075,y:515}, DORM:{x:1200,y:450},
         BPTZ: {x:585,y:485},  BALT:{x:710,y:555},
-        DALT: {x:1140, y:490}, MALT:{x:880,y:184},
-        CONF:{x:305,y:840},   JNDL:{x:430,y:840},
+        DALT: {x:1140, y:490}, MALT:{x:880,y:180},
+        CONF:{x:305,y:840},   CORR:{x:300,y:928},   JNDL:{x:430,y:840},
         HALLU:{x:560,y:920},  BALC:{x:510,y:999},
       };
       const downRooms = ['GLASS','FOYER','MARKET','JACUZ','HALLD','DINING','KITCH','BAR','CLOS','DORM','BPTZ','BALT','DALT','MALT'];
-      const upRooms   = ['CONF','JNDL','HALLU','BALC'];
+      const upRooms   = ['CONF','CORR','JNDL','HALLU','BALC'];
       const c = centres[fpActiveRoom];
       const onFloor = isDown ? downRooms.includes(fpActiveRoom) : upRooms.includes(fpActiveRoom);
       if (c && onFloor) {
@@ -419,9 +427,9 @@
 
     if (isDown) {
       addHit('GLASS',  310,  10, 230, 290);
-      addHit('FOYER',  542,  10, 259, 295);
-      addHit('MARKET', 711,  10, 130, 300);
-      addHit('MALT',   850, 169,  90,  50);
+      addHit('FOYER',  542,  10, 258, 190);
+      addHit('MARKET', 800,  10, 100,  90);
+      addHit('MALT',   860, 162,  40,  37);
       addHit('JACUZ', 1211, 211,  89,  99);
       addHit('HALLD',  540, 300, 560,  80);
       addHit('DINING',  10, 370, 290, 220);
@@ -434,6 +442,7 @@
       addHit('DALT',  1100, 450,  80,  70);
     } else {
       addHit('CONF',   260, 800,  80, 170);
+      addHit('CORR',   260, 887,  80,  83);
       addHit('JNDL',   400, 803, 100,  87);
       addHit('HALLU',  340, 890, 510,  82);
       addHit('BALC',   539, 960, 221,  67);
@@ -587,8 +596,8 @@
       // Sub-zones: [id, label, l%, t%, w%, h%, isSub]
       // (isSub=true renders with border + smaller text)
       ['GLASS',  'GLASS ROOM',   23.6,  1.6, 17.5, 46.8],
-      ['FOYER',  'FOYER',        41.2,  1.6, 19.7, 47.6],
-      ['MARKET', 'MARKET',       54.1,  1.6,  9.9, 27.3],
+      ['FOYER',  'FOYER',        41.2,  1.6, 19.6, 18.3],
+      ['MARKET', 'MARKET',       60.9,  1.0,  7.6,  8.7],
       ['JACUZ',  'JAC',          92.2, 34.0,  6.8, 16.0],
       ['HALLD',  'HALLWAY DOWN', 41.1, 48.4, 42.6, 12.9],
       ['DINING', 'DINING',        0.8, 59.7, 22.1, 35.5],
@@ -598,11 +607,12 @@
       ['BPTZ',   'PTZ',           41.9, 72.7,  5.3, 11.0, true],
       ['BALT',   'ALT',           51.0, 83.9,  6.1, 11.3, true],
       ['DALT',   'ALT',           84.0, 85.0,  5.8,  9.0, true],
-      ['MALT',   'ALT',           64.7, 27.3,  6.8,  8.1, true],
+      ['MALT',   'ALT',           65.5, 15.6,  3.0,  3.6, true],
       ['DORM',   'DORM',         83.7, 50.0, 15.2, 45.2],
     ];
     const LABELS_UP = [
-      ['CONF',  'CON',         2.8, 16.0, 11.0, 43.2],
+      ['CONF',  'CON',         2.8, 16.0, 11.0, 22.1],
+      ['CORR',  'CORR',        2.8, 38.2, 11.0, 21.3],
       ['JNDL',  'JUNGLE',     22.0, 16.8, 13.8, 22.1],
       ['HALLU', 'HALLWAY UP', 13.8, 38.9, 70.2, 20.9],
       ['BALC',  'BALCONY',    41.2, 56.7, 30.4, 17.0],
