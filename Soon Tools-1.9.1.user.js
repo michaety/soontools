@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Tools
 // @namespace    https://fishtank.news
-// @version      1.9.2
+// @version      1.9.3
 // @description  Floorplan room switcher + clip & post to X — fishtank.news | soon tools
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -596,8 +596,8 @@
       // Sub-zones: [id, label, l%, t%, w%, h%, isSub]
       // (isSub=true renders with border + smaller text)
       ['GLASS',  'GLASS ROOM',   23.6,  1.6, 17.5, 46.8],
-      ['FOYER',  'FOYER',        41.2,  1.6, 19.6, 18.3],
-      ['MARKET', 'MARKET',       60.9,  1.0,  7.6,  8.7],
+      ['FOYER',  'FOYER',        41.1,  1.6, 19.8, 46.8],
+      ['MARKET', 'MAR',          60.9,  1.6,  7.6, 14.5],
       ['JACUZ',  'JAC',          92.2, 34.0,  6.8, 16.0],
       ['HALLD',  'HALLWAY DOWN', 41.1, 48.4, 42.6, 12.9],
       ['DINING', 'DINING',        0.8, 59.7, 22.1, 35.5],
@@ -609,6 +609,8 @@
       ['DALT',   'ALT',           84.0, 85.0,  5.8,  9.0, true],
       ['MALT',   'ALT',           65.5, 15.6,  3.0,  3.6, true],
       ['DORM',   'DORM',         83.7, 50.0, 15.2, 45.2],
+      ['_STRS1', 'STRS',         37.2, 31.9, 16.4, 17.3, true],
+      ['_STRS2', 'STRS',          0.8, 50.2, 22.1,  9.5, true],
     ];
     const LABELS_UP = [
       ['CONF',  'CON',         2.8, 16.0, 11.0, 22.1],
@@ -626,8 +628,9 @@
       for (let i = 0; i < LABELS.length; i++) {
         const [id, label, l, t, w, h] = LABELS[i];
         const isSub = LABELS[i][6] === true;
-        const isOff = offlineRooms.has(id);
-        const isActive = fpActiveRoom === id;
+        const isStair = id.startsWith('_');
+        const isOff = !isStair && offlineRooms.has(id);
+        const isActive = !isStair && fpActiveRoom === id;
         const btn = document.createElement('button');
         btn.dataset.fpRoom = id;
         btn.textContent = label;
@@ -656,7 +659,16 @@
           'overflow:hidden',
           isSub ? 'border-radius:2px' : '',
         ].filter(Boolean).join(';');
-        if (!isOff) {
+        if (isStair) {
+          btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(245,239,234,0.55)'; });
+          btn.addEventListener('mouseleave', () => { btn.style.background = 'rgba(0,0,0,0.06)'; });
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fpFloor = isDown ? 'up' : 'down';
+            fpRebuildSVG();
+            if (fpBuildLabelsRef) fpBuildLabelsRef();
+          });
+        } else if (!isOff) {
           btn.addEventListener('mouseenter', () => {
             if (fpActiveRoom !== id) {
               btn.style.color = T.primary;
