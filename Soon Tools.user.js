@@ -6,6 +6,8 @@
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
 // @match        https://fishtank.live/*
+// @updateURL    https://raw.githubusercontent.com/michaety/soontools/main/soon-tools.user.js
+// @downloadURL  https://raw.githubusercontent.com/michaety/soontools/main/soon-tools.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        unsafeWindow
