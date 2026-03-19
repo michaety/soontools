@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Tools
 // @namespace    https://fishtank.news
-// @version      1.9.2
+// @version      1.9.3
 // @description  Floorplan room switcher + clip & post to X — fishtank.news | soon tools
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -595,20 +595,26 @@
     const LABELS_DOWN = [
       // Sub-zones: [id, label, l%, t%, w%, h%, isSub]
       // (isSub=true renders with border + smaller text)
-      ['GLASS',  'GLASS ROOM',   23.6,  1.6, 17.5, 46.8],
-      ['FOYER',  'FOYER',        41.2,  1.6, 19.6, 18.3],
-      ['MARKET', 'MARKET',       60.9,  1.0,  7.6,  8.7],
-      ['JACUZ',  'JAC',          92.2, 34.0,  6.8, 16.0],
-      ['HALLD',  'HALLWAY DOWN', 41.1, 48.4, 42.6, 12.9],
-      ['DINING', 'DINING',        0.8, 59.7, 22.1, 35.5],
-      ['KITCH',  'KITCHEN',      22.8, 50.0, 18.3, 45.2],
-      ['BAR',    'BAR',          41.9, 61.3, 23.6, 33.9],
-      ['CLOS',   'CLO',          79.9, 77.4,  3.8, 11.3],
-      ['BPTZ',   'PTZ',           41.9, 72.7,  5.3, 11.0, true],
-      ['BALT',   'ALT',           51.0, 83.9,  6.1, 11.3, true],
-      ['DALT',   'ALT',           84.0, 85.0,  5.8,  9.0, true],
-      ['MALT',   'ALT',           65.5, 15.6,  3.0,  3.6, true],
-      ['DORM',   'DORM',         83.7, 50.0, 15.2, 45.2],
+      // __STAIR__ entries use floor-toggle click handler instead of onRoomSelected
+      ['GLASS',     'GLASS ROOM',   23.6,  1.6, 17.5, 46.8],
+      // FOYER — large background rect covering full foyer space (rendered first, behind stairs)
+      ['FOYER',     'FOYER',        41.3,  1.6, 19.6, 46.8],
+      // MARKET — its own separate space to the right of FOYER, not overlapping
+      ['MARKET',    'MAR',          60.9,  1.6,  7.6, 14.5],
+      ['JACUZ',     'JAC',          92.2, 34.0,  6.8, 16.0],
+      ['HALLD',     'HALLWAY DOWN', 41.1, 48.4, 42.6, 12.9],
+      ['DINING',    'DINING',        0.8, 59.7, 22.1, 35.5],
+      ['KITCH',     'KITCHEN',      22.8, 50.0, 18.3, 45.2],
+      ['BAR',       'BAR',          41.9, 61.3, 23.6, 33.9],
+      ['CLOS',      'CLO',          79.9, 77.4,  3.8, 11.3],
+      ['BPTZ',      'PTZ',          41.9, 72.7,  5.3, 11.0, true],
+      ['BALT',      'ALT',          51.0, 83.9,  6.1, 11.3, true],
+      ['DALT',      'ALT',          84.0, 85.0,  5.8,  9.0, true],
+      ['MALT',      'ALT',          65.5, 15.6,  3.0,  3.6, true],
+      ['DORM',      'DORM',         83.7, 50.0, 15.2, 45.2],
+      // STAIRS — rendered after FOYER so they sit on top and intercept clicks; toggle floor
+      ['__STAIR__', 'STAIRS',       37.2, 31.9, 16.4, 17.3],
+      ['__STAIR__', 'STAIRS',        0.8, 50.2, 22.1,  9.5],
     ];
     const LABELS_UP = [
       ['CONF',  'CON',         2.8, 16.0, 11.0, 22.1],
@@ -626,6 +632,7 @@
       for (let i = 0; i < LABELS.length; i++) {
         const [id, label, l, t, w, h] = LABELS[i];
         const isSub = LABELS[i][6] === true;
+        const isStair = id === '__STAIR__';
         const isOff = offlineRooms.has(id);
         const isActive = fpActiveRoom === id;
         const btn = document.createElement('button');
@@ -634,18 +641,18 @@
         btn.style.cssText = [
           'position:absolute',
           `left:${l}%`, `top:${t}%`, `width:${w}%`, `height:${h}%`,
-          `background:${isActive ? 'rgba(255,232,214,0.45)' : isSub ? 'rgba(0,0,0,0.06)' : 'transparent'}`,
-          `border:${isSub ? '1px solid rgba(0,0,0,0.25)' : 'none'}`,
+          `background:${isActive ? 'rgba(255,232,214,0.45)' : (isSub || isStair) ? 'rgba(0,0,0,0.06)' : 'transparent'}`,
+          `border:${(isSub || isStair) ? '1px solid rgba(0,0,0,0.25)' : 'none'}`,
           'display:flex',
           'align-items:center',
           'justify-content:center',
           'text-align:center',
           `font-family:${T.fontSecondary || 'highway-gothic,sans-serif'}`,
-          `font-size:${isSub ? 'clamp(4px,0.9vw,7px)' : 'clamp(5px,1.2vw,9px)'}`,
+          `font-size:${(isSub || isStair) ? 'clamp(4px,0.9vw,7px)' : 'clamp(5px,1.2vw,9px)'}`,
           'font-weight:700',
           'letter-spacing:0.06em',
           'text-transform:uppercase',
-          `color:${isOff ? 'rgba(0,0,0,0.2)' : isActive ? T.primary : isSub ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.65)'}`,
+          `color:${isOff ? 'rgba(0,0,0,0.2)' : isActive ? T.primary : (isSub || isStair) ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.65)'}`,
           `cursor:${isOff ? 'default' : 'pointer'}`,
           'pointer-events:auto',
           'line-height:1.1',
@@ -654,9 +661,24 @@
           'white-space:normal',
           'word-break:break-word',
           'overflow:hidden',
-          isSub ? 'border-radius:2px' : '',
+          isSub || isStair ? 'border-radius:2px' : '',
         ].filter(Boolean).join(';');
-        if (!isOff) {
+        if (isStair) {
+          btn.addEventListener('mouseenter', () => {
+            btn.style.color = T.primary;
+            btn.style.background = 'rgba(245,239,234,0.55)';
+          });
+          btn.addEventListener('mouseleave', () => {
+            btn.style.color = 'rgba(0,0,0,0.5)';
+            btn.style.background = 'rgba(0,0,0,0.06)';
+          });
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fpFloor = fpFloor === 'down' ? 'up' : 'down';
+            fpRebuildSVG();
+            if (fpBuildLabelsRef) fpBuildLabelsRef();
+          });
+        } else if (!isOff) {
           btn.addEventListener('mouseenter', () => {
             if (fpActiveRoom !== id) {
               btn.style.color = T.primary;
