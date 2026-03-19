@@ -528,9 +528,8 @@
       ['CONF',  'CON',         1.3, 10.8, 10.2, 23.6],
       ['CORR',  'CORR',        1.3, 34.4, 10.2, 22.5],
       ['JNDL',  'JUNGLE',     19.2, 11.7, 12.8, 23.6],
-      ['HALLU', 'HALLWAY UP', 11.7, 35.2, 61.3, 22.2],
+      ['HALLU', 'HALLWAY UP', 11.7, 35.2, 37.0, 22.2],
       ['BALC',  'BALCONY',    48.7, 35.8, 12.8, 21.7],
-      ['_STRS1','STRS',       45.1,  0.0,  7.6, 59.1, true], // big stairwell column
       ['_STRS2','STRS',        1.8, 55.0,  7.6, 23.6, true], // small stair bottom-left
     ];
 
