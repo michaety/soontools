@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Soon Tools
+// @name         Soon Map
 // @namespace    https://fishtank.news
-// @version      2.1.0
+// @version      2.2.0
 // @description  Interactive floorplan map for fishtank.live — click any room to switch cam, syncs with the tab bar. By fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
