@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Map
 // @namespace    https://fishtank.news
-// @version      2.2.1
+// @version      2.2.2
 // @description  Interactive floorplan map for fishtank.live — click any room to switch cam, syncs with the tab bar. By fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -148,7 +148,7 @@
     if (!vid) return;
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
-    svg.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;pointer-events:none;z-index:9999;overflow:visible;';
+    svg.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:9999;overflow:visible;';
     const T = getTheme();
     for (const zone of zones) {
       if (zone.action?.name !== 'Change Live Stream') continue;
@@ -163,11 +163,8 @@
       const hit = document.createElementNS(NS, 'polygon');
       hit.setAttribute('data-target-slug', targetSlug);
       hit.style.cssText = 'fill:transparent;stroke:none;cursor:pointer;pointer-events:all;';
-      const lbl = document.createElementNS(NS, 'text');
-      lbl.style.cssText = 'font-size:11px;fill:white;font-weight:700;letter-spacing:0.05em;pointer-events:none;opacity:0;transition:opacity 0.15s;font-family:highway-gothic,sans-serif;text-transform:uppercase;text-shadow:0 1px 2px rgba(0,0,0,0.8);';
-      lbl.textContent = zone.name.replace(/^.* to /i, '');
-      hit.addEventListener('mouseenter', () => { vis.style.opacity = '0.35'; lbl.style.opacity = '1'; });
-      hit.addEventListener('mouseleave', () => { vis.style.opacity = '0'; lbl.style.opacity = '0'; });
+      hit.addEventListener('mouseenter', () => { vis.style.opacity = '0.35'; });
+      hit.addEventListener('mouseleave', () => { vis.style.opacity = '0'; });
       hit.addEventListener('click', (e) => {
         e.stopPropagation();
         // Find room by slug and select it directly
@@ -179,7 +176,7 @@
           switchToSlug(targetSlug);
         }
       });
-      g.appendChild(vis); g.appendChild(lbl); g.appendChild(hit);
+      g.appendChild(vis); g.appendChild(hit);
       svg.appendChild(g);
     }
     document.body.appendChild(svg);
@@ -198,9 +195,6 @@
         const scy = r.top  + cy * r.height;
         g.querySelector('polygon:nth-of-type(1)').setAttribute('points', screenPts);
         g.querySelector('polygon:nth-of-type(2)').setAttribute('points', screenPts);
-        const t = g.querySelector('text');
-        t.setAttribute('x', String(scx));
-        t.setAttribute('y', String(scy));
       }
       requestAnimationFrame(reposition);
     };
@@ -891,7 +885,7 @@
 
     fpContainer.parentElement.insertBefore(wrapper, fpContainer);
     fpInjected = true;
-    console.log('[SOON] Floorplan injected v2.2.0');
+    console.log('[SOON] Floorplan injected v2.2.1');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -984,7 +978,7 @@
     });
     removalObs.observe(document.body, { childList: true, subtree: true });
 
-    console.log('[SOON] Soon Map v2.2.0 ready');
+    console.log('[SOON] Soon Map v2.2.1 ready');
   }
 
   if (document.readyState !== 'loading') init();
