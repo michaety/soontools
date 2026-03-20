@@ -14,6 +14,7 @@ Navigate the house using an interactive architectural floorplan overlay. Click a
 - Clickable floorplan for downstairs and upstairs
 - Staircase zones toggle between floors
 - Offline rooms shown as greyed out automatically
+- Includes alt cams
 - Director Mode button
 - Inherits fishtank.live's theme — looks native
 - Toggle between Map and Tabs view at any time
