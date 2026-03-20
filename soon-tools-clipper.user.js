@@ -9,6 +9,9 @@
 // @grant        GM_addStyle
 // @grant        unsafeWindow
 // @run-at       document-end
+// @version      2.0.0
+// @updateURL    https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js
+// @downloadURL  https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js
 // ==/UserScript==
 
 (function () {
