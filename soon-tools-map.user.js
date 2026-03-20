@@ -980,18 +980,11 @@
           const room = ROOMS.find(r => r.tab && (cleaned === r.tab || cleaned === r.label));
           if (room && !el.dataset?.fpRoom) {
             fpActiveRoom = room.id;
-            if (room.floor === fpFloor || !room.floor) {
-              if (fpMapEl) {
-                fpMapEl.querySelectorAll('[id^="ftfp-fill-"]').forEach(f => {
-                  const id = f.id.replace('ftfp-fill-', '');
-                  f.setAttribute('fill', id === fpActiveRoom ? FP_FILL_ACTIVE : 'transparent');
-                  f.setAttribute('opacity', id === fpActiveRoom ? '0.45' : '0');
-                });
-              }
-              if (fpBuildLabelsRef) fpBuildLabelsRef();
-            }
+            // Always switch to the correct floor
+            if (room.floor && room.floor !== fpFloor) fpFloor = room.floor;
+            // Full rebuild so floor switch + highlight both apply
+            fpRebuildSVG();
             clipApplyRoomStream(room.id);
-            // Re-fetch zones for the newly active room
             if (room.slug) showZoneOverlay(room.slug);
             break;
           }
