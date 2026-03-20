@@ -13,6 +13,9 @@
 // @grant        unsafeWindow
 // @connect      api.fishtank.live
 // @run-at       document-start
+// @version      2.0.0
+// @updateURL    https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-map.user.js
+// @downloadURL  https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-map.user.js
 // ==/UserScript==
 
 (function () {
