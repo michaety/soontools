@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Soon Tools — Clip
+// @name         Soon Clipper
 // @namespace    https://fishtank.news
 // @version      2.0.0
 // @description  Clip, trim, crop, watermark & download fishtank.live streams — fishtank.news
