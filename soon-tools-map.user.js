@@ -80,13 +80,16 @@
   // ── ZONES API ──────────────────────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // Extract the JWT token from any stream segment already fetched by the page
+  // Extract JWT token from any stream segment already fetched by the page
+  // Handles both ?tkn= and ?jwt= formats
   function getStreamToken() {
     try {
       const entries = (unsafeWindow || window).performance.getEntriesByType('resource');
       for (const e of entries) {
-        const m = e.name.match(/streams-g\.fishtank\.live.*[?&]tkn=([^&]+)/);
-        if (m) return decodeURIComponent(m[1]);
+        let m = e.name.match(/streams-[a-z]\.fishtank\.live.*[?&]tkn=([^&]+)/);
+        if (m) return { param: 'tkn', value: decodeURIComponent(m[1]) };
+        m = e.name.match(/streams-[a-z]\.fishtank\.live.*[?&]jwt=([^&]+)/);
+        if (m) return { param: 'jwt', value: decodeURIComponent(m[1]) };
       }
     } catch(e) {}
     return null;
@@ -95,8 +98,8 @@
   // Build m3u8 URL directly from slug
   function slugToM3u8(slug) {
     const tkn = getStreamToken();
-    const base = `https://streams-g.fishtank.live/hls/live+${slug}/1/index.m3u8`;
-    return tkn ? `${base}?tkn=${tkn}` : base;
+    const base = `https://streams-k.fishtank.live/hls/live+${slug}/index.m3u8`;
+    return tkn ? `${base}?${tkn.param}=${tkn.value}` : base;
   }
 
   // Fetch clickable zones for a stream slug from Fishtank's API
@@ -160,23 +163,9 @@
     const vid = getVideoEl();
     if (!vid) return;
 
-    // Ensure video container is positioned so we can overlay
-    const container = vid.parentElement;
-    if (!container) return;
-    const cs = getComputedStyle(container);
-    if (cs.position === 'static') container.style.position = 'relative';
-
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 1 1');
-    svg.setAttribute('preserveAspectRatio', 'none');
-    svg.style.cssText = [
-      'position:absolute',
-      'top:0', 'left:0', 'width:100%', 'height:100%',
-      'pointer-events:none',
-      'z-index:10',
-      'overflow:visible',
-    ].join(';');
+    svg.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;pointer-events:none;z-index:9999;overflow:visible;';
 
     const T = getTheme();
 
@@ -186,94 +175,136 @@
       if (pts.length < 3) continue;
 
       const targetSlug = zone.action.metadata;
-      const pointsAttr = pts.map(p => `${p.x},${p.y}`).join(' ');
 
-      // Hit area polygon — invisible but captures pointer events
+      // We'll reposition polygons on each frame relative to the video element
+      const g = document.createElementNS(NS, 'g');
+      g.dataset.targetSlug = targetSlug;
+      g.dataset.normPoints = zone.points;
+
+      const vis = document.createElementNS(NS, 'polygon');
+      vis.style.cssText = `fill:${T.primary};opacity:0;stroke:${T.primary};stroke-width:1.5;pointer-events:none;transition:opacity 0.15s;`;
+
       const hit = document.createElementNS(NS, 'polygon');
-      hit.setAttribute('points', pointsAttr);
+      hit.setAttribute('data-target-slug', targetSlug);
       hit.style.cssText = 'fill:transparent;stroke:none;cursor:pointer;pointer-events:all;';
 
-      // Visual highlight polygon — shown on hover
-      const vis = document.createElementNS(NS, 'polygon');
-      vis.setAttribute('points', pointsAttr);
-      vis.style.cssText = `fill:${T.primary};opacity:0;stroke:${T.primary};stroke-width:0.003;pointer-events:none;transition:opacity 0.15s;`;
-
-      // Label — positioned at centroid
-      const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-      const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
       const lbl = document.createElementNS(NS, 'text');
-      lbl.setAttribute('x', String(cx));
-      lbl.setAttribute('y', String(cy));
-      lbl.setAttribute('text-anchor', 'middle');
-      lbl.setAttribute('dominant-baseline', 'middle');
-      lbl.style.cssText = 'font-size:0.03px;fill:white;font-weight:700;letter-spacing:0.002em;pointer-events:none;opacity:0;transition:opacity 0.15s;font-family:highway-gothic,sans-serif;text-transform:uppercase;';
-      lbl.textContent = zone.name.replace(/^.* to /i, ''); // strip "Bar to " prefix
+      lbl.style.cssText = 'font-size:11px;fill:white;font-weight:700;letter-spacing:0.05em;pointer-events:none;opacity:0;transition:opacity 0.15s;font-family:highway-gothic,sans-serif;text-transform:uppercase;text-shadow:0 1px 2px rgba(0,0,0,0.8);';
+      lbl.textContent = zone.name.replace(/^.* to /i, '');
 
-      hit.addEventListener('mouseenter', () => {
-        vis.style.opacity = '0.35';
-        lbl.style.opacity = '1';
-      });
-      hit.addEventListener('mouseleave', () => {
-        vis.style.opacity = '0';
-        lbl.style.opacity = '0';
-      });
-      hit.addEventListener('click', (e) => {
-        e.stopPropagation();
-        switchToSlug(targetSlug);
-      });
+      hit.addEventListener('mouseenter', () => { vis.style.opacity = '0.35'; lbl.style.opacity = '1'; });
+      hit.addEventListener('mouseleave', () => { vis.style.opacity = '0'; lbl.style.opacity = '0'; });
+      hit.addEventListener('click', (e) => { e.stopPropagation(); switchToSlug(targetSlug); });
 
-      svg.appendChild(vis);
-      svg.appendChild(lbl);
-      svg.appendChild(hit);
+      g.appendChild(vis);
+      g.appendChild(lbl);
+      g.appendChild(hit);
+      svg.appendChild(g);
     }
 
-    container.appendChild(svg);
+    document.body.appendChild(svg);
     _zoneOverlay = svg;
     _activeSlug = slug;
+
+    // Reposition polygons on every animation frame to track the video element
+    const reposition = () => {
+      if (!_zoneOverlay || _zoneOverlay !== svg) return;
+      const r = vid.getBoundingClientRect();
+      if (!r.width) { requestAnimationFrame(reposition); return; }
+
+      for (const g of svg.querySelectorAll('g[data-norm-points]')) {
+        const pts = parseZonePoints(g.dataset.normPoints);
+        const screenPts = pts.map(p => `${r.left + p.x * r.width},${r.top + p.y * r.height}`).join(' ');
+        const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+        const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+        const scx = r.left + cx * r.width;
+        const scy = r.top  + cy * r.height;
+
+        g.querySelector('polygon:nth-of-type(1)').setAttribute('points', screenPts);
+        g.querySelector('polygon:nth-of-type(2)').setAttribute('points', screenPts);
+        const t = g.querySelector('text');
+        t.setAttribute('x', String(scx));
+        t.setAttribute('y', String(scy));
+      }
+      requestAnimationFrame(reposition);
+    };
+    requestAnimationFrame(reposition);
+  }
+
+  // Alt cam definitions — XY ratio is coords[0]/coords[1] from the polygon's points string
+  // Scale-invariant so it works across any screen size
+  const ALT_CAMERAS = {
+    'BALT': { parentId: 'BAR',    xyRatio: 9.19  },
+    'DALT': { parentId: 'DORM',   xyRatio: 390   },
+    'MALT': { parentId: 'MARKET', xyRatio: 263   },
+  };
+
+  // Find a Fishtank transition polygon by XY ratio (scale-invariant)
+  function findAltPolygon(xyRatio) {
+    const polygons = document.querySelectorAll('polygon');
+    return Array.from(polygons).find(p => {
+      const pts = p.getAttribute('points');
+      if (!pts) return false;
+      const coords = pts.split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
+      if (coords.length < 2 || coords[1] === 0) return false;
+      const ratio = coords[0] / coords[1];
+      return Math.abs(ratio - xyRatio) / xyRatio < 0.15;
+    });
+  }
+
+  // Click the centre of a polygon using getBoundingClientRect
+  function clickPolygonCentre(polygon) {
+    const rect = polygon.getBoundingClientRect();
+    const cx = rect.left + rect.width  / 2;
+    const cy = rect.top  + rect.height / 2;
+    polygon.dispatchEvent(new MouseEvent('click', {
+      bubbles: true, cancelable: true, clientX: cx, clientY: cy,
+      view: unsafeWindow || window,
+    }));
+    console.log('[SOON] clicked polygon centre at', cx.toFixed(0), cy.toFixed(0));
   }
 
   // Switch stream by slug — used by zone polygon clicks
-  // Finds matching ROOM or treats as raw slug, updates map highlight + re-fetches zones
   function switchToSlug(slug) {
     console.log('[SOON] switchToSlug:', slug);
 
-    // Find a ROOM matching this slug
-    const room = ROOMS.find(r => r.slug === slug);
-    if (room) {
-      // Known room — go through normal flow
-      onRoomSelected(room.id);
+    const altId  = Object.keys(ALT_CAMERAS).find(id => ROOMS.find(r => r.id === id)?.slug === slug);
+    const altDef = altId ? ALT_CAMERAS[altId] : null;
+
+    if (!altDef) {
+      console.warn('[SOON] switchToSlug: no alt cam definition for', slug);
       return;
     }
 
-    // Unknown slug (alt cam not in ROOMS) — switch stream directly
-    // Update active slug tracking, refresh zone overlay for the new stream
-    _activeSlug = slug;
-    showZoneOverlay(slug);
+    const alreadyOnParent = fpActiveRoom === altDef.parentId;
 
-    // Also try to click the matching tab button if one exists
-    fpClickTabBySlug(slug);
-
-    // Notify clip tool
-    if (typeof window.SOON === 'object') {
-      window.SOON.activeSlug = slug;
-      window.SOON.activeM3u8 = slugToM3u8(slug);
-    }
-  }
-
-  // Try to click a fishtank tab button matching a slug (best-effort, no crash if not found)
-  function fpClickTabBySlug(slug) {
-    const room = ROOMS.find(r => r.slug === slug);
-    if (room) { fpClickTab(room.id); return; }
-    // Try matching slug fragment against button text
-    const fragment = slug.replace(/-\d+$/, '').toLowerCase();
-    for (const btn of document.querySelectorAll('button')) {
-      if (btn.textContent.trim().toLowerCase().includes(fragment)) {
-        btn.focus();
-        ['mousedown','mouseup','click'].forEach(t =>
-          btn.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: unsafeWindow || window }))
-        );
-        return;
+    const pollForPolygon = (attempts = 0) => {
+      const polygon = findAltPolygon(altDef.xyRatio);
+      if (polygon) {
+        clickPolygonCentre(polygon);
+        _activeSlug = slug;
+        showZoneOverlay(slug);
+        window.SOON = window.SOON || {};
+        window.SOON.activeSlug = slug;
+        window.SOON.activeM3u8 = slugToM3u8(slug);
+      } else if (attempts < 100) {
+        setTimeout(() => pollForPolygon(attempts + 1), 100);
+      } else {
+        console.warn('[SOON] switchToSlug: polygon not found for', slug);
       }
+    };
+
+    if (alreadyOnParent) {
+      pollForPolygon();
+    } else {
+      // Switch to parent directly
+      fpActiveRoom = altDef.parentId;
+      const parentRoom = ROOMS.find(r => r.id === altDef.parentId);
+      if (parentRoom?.floor) fpFloor = parentRoom.floor;
+      fpRebuildSVG();
+      fpClickTab(altDef.parentId);
+      // Poll immediately — no fixed delay, polygon appears when stream loads
+      pollForPolygon();
     }
   }
 
@@ -294,7 +325,7 @@
     { id: 'KITCH',  label: 'Kitchen',      slug: 'ktch-5',  tab: 'Kitchen',       floor: 'down', streamKey: 'kitchen'      },
     { id: 'BAR',    label: 'Bar',          slug: 'brrr-5',  tab: 'Bar',           floor: 'down', streamKey: 'bar'          },
     { id: 'CLOS',   label: 'Closet',       slug: 'clst-5',  tab: 'Closet',        floor: 'down', streamKey: 'closet'       },
-    { id: 'DORM',   label: 'Dorm',         slug: 'dorm-5',  tab: 'Dorm',          floor: 'down', streamKey: 'dorm'         },
+    { id: 'DORM',   label: 'Dorm',         slug: 'dmrm-5',  tab: 'Dorm',          floor: 'down', streamKey: 'dorm'         },
     // ── UPSTAIRS ───────────────────────────────────────────────────────────
     { id: 'CONF',   label: 'Confessional', slug: 'conf-5',  tab: 'Confessional',  floor: 'up',   streamKey: 'confess'      },
     { id: 'CORR',   label: 'Corridor',     slug: 'corr-5',  tab: 'Corridor',      floor: 'up',   streamKey: 'corridor'     },
@@ -305,6 +336,10 @@
     { id: 'DIR',    label: 'Director Mode',slug: 'drctr-5', tab: 'Director Mode', floor: null,   streamKey: 'director'     },
     { id: 'BPTZ',   label: 'Bar PTZ',      slug: 'brpz-5',  tab: 'Bar PTZ',       floor: 'down', streamKey: 'bar ptz'      },
     { id: 'CAM',    label: 'Cameraman',    slug: 'cmmn-5',  tab: 'Cameraman',     floor: null,   streamKey: 'cameraman'    },
+    // ── ALT CAMS ───────────────────────────────────────────────────────────
+    { id: 'BALT',   label: 'Bar Alt',      slug: 'brrr2-5', tab: 'Bar Alternate',    floor: 'down', streamKey: 'bar alternate'    },
+    { id: 'DALT',   label: 'Dorm Alt',     slug: 'dmrm2-5', tab: 'Dorm Alternate',   floor: 'down', streamKey: 'dorm alternate'   },
+    { id: 'MALT',   label: 'Market Alt',   slug: 'mrke2-5', tab: 'Market Alternate', floor: 'down', streamKey: 'market alternate' },
   ];
 
   // NOTE: Slugs above are best-guess from the API pattern we've seen (brrr-5, brpz-5, ktch-5, hwdn-5).
@@ -345,18 +380,14 @@
     fpRebuildSVG();
     fpClickTab(roomId);
     clipApplyRoomStream(roomId);
-
-    // Fetch and show zone overlay for this room's slug
     removeZoneOverlay();
     if (room?.slug) {
       showZoneOverlay(room.slug);
-
-      // Expose on SOON namespace for clip tool
       window.SOON = window.SOON || {};
-      window.SOON.activeRoomId  = roomId;
-      window.SOON.activeRoom    = room;
-      window.SOON.activeSlug    = room.slug;
-      window.SOON.activeM3u8    = slugToM3u8(room.slug);
+      window.SOON.activeRoomId = roomId;
+      window.SOON.activeRoom   = room;
+      window.SOON.activeSlug   = room.slug;
+      window.SOON.activeM3u8   = slugToM3u8(room.slug);
       if (typeof window.SOON.onRoomChange === 'function') {
         window.SOON.onRoomChange(roomId, room, room.slug, window.SOON.activeM3u8);
       }
@@ -538,6 +569,9 @@
       addFill('BPTZ',   550, 451,  70,  68, offlineRooms.has('BPTZ'));
       addFill('CLOS',  1050, 480,  50,  70, offlineRooms.has('CLOS'));
       addFill('DORM',  1100, 310, 200, 280, offlineRooms.has('DORM'));
+      addFill('DALT',  1100, 310,  70,  70, offlineRooms.has('DALT')); // top-left of Dorm, square
+      addFill('MALT',   860, 150,  60,  60, offlineRooms.has('MALT')); // bottom-right of Market, square
+      addFill('BALT',   670, 520,  80,  70, offlineRooms.has('BALT'));
     } else {
       addFill('CONF',  260, 800,  80,  87, offlineRooms.has('CONF'));
       addFill('CORR',  260, 887,  80,  83, offlineRooms.has('CORR'));
@@ -559,7 +593,14 @@
           const f = document.getElementById('ftfp-fill-'+id);
           if (f && fpActiveRoom !== id) { f.setAttribute('fill', 'transparent'); f.setAttribute('opacity', '0'); }
         });
-        r.addEventListener('click', () => onRoomSelected(id));
+        r.addEventListener('click', () => {
+          if (id in ALT_CAMERAS) {
+            const room = ROOMS.find(r => r.id === id);
+            if (room?.slug) switchToSlug(room.slug);
+          } else {
+            onRoomSelected(id);
+          }
+        });
       }
       svg.appendChild(r);
     }
@@ -567,14 +608,17 @@
     if (isDown) {
       addHit('GLASS',  310,  10, 230, 290);
       addHit('FOYER',  542,  10, 258, 190);
+      addHit('MALT',   860, 150,  60,  60);
       addHit('MARKET', 811,  80, 109, 120);
       addHit('JACUZ', 1211, 211,  89,  99);
       addHit('HALLD',  540, 300, 560,  80);
       addHit('DINING',  10, 370, 290, 220);
       addHit('KITCH',  300, 310, 240, 280);
+      addHit('BALT',   670, 520,  80,  70);
       addHit('BAR',    550, 380, 310, 210);
       addHit('BPTZ',   550, 451,  70,  68);
       addHit('CLOS',  1050, 480,  50,  70);
+      addHit('DALT',  1100, 310,  70,  70);
       addHit('DORM',  1100, 310, 200, 280);
     } else {
       addHit('CONF',  260, 800,  80,  87);
@@ -738,6 +782,9 @@
       ['BAR',    'BAR',          41.9, 61.3, 23.6, 33.9],
       ['CLOS',   'CLO',          79.9, 77.4,  5.5, 11.3],
       ['BPTZ',   'PTZ',          41.9, 72.7,  5.3, 11.0, true],
+      ['BALT',   'ALT',          51.0, 83.9,  6.1, 11.3, true],
+      ['DALT',   'ALT',          83.7, 50.0,  5.3,  11.3, true], // top-left of Dorm
+      ['MALT',   'ALT',          65.5, 22.6,  4.6,   9.7, true], // bottom-right of Market
       ['DORM',   'DORM',         83.7, 50.0, 15.2, 45.2],
       ['_STRS1b','',             41.5, 40.3, 12.2,  8.9, true],
     ];
@@ -804,7 +851,14 @@
           btn.addEventListener('mouseleave', () => {
             if (fpActiveRoom !== id) { btn.style.color = isSub ? subColor : normalColor; btn.style.background = isSub ? subBg : 'transparent'; if (isSub) btn.style.border = '1px solid rgba(255,255,255,0.18)'; }
           });
-          btn.addEventListener('click', () => onRoomSelected(id));
+          btn.addEventListener('click', () => {
+            if (id in ALT_CAMERAS) {
+              const room = ROOMS.find(r => r.id === id);
+              if (room?.slug) switchToSlug(room.slug);
+            } else {
+              onRoomSelected(id);
+            }
+          });
         }
         overlay.appendChild(btn);
       }
