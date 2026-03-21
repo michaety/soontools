@@ -23,9 +23,25 @@ Navigate the house using an interactive architectural floorplan overlay. Click a
 
 ---
 
-## 🎬 Soon Clipper
+## 🎬 Soon Clipper (beta)
+Snipping tool–style video recorder for Fishtank Live. Record fullscreen or cropped selections, trim, and export to MP4 or WebM.
+Installation
 
-> soon...
+**Features:**
+
+- Fullscreen Record/Screenshot — Capture entire video stream at native resolution
+- Crop Record/Screenshot (✂) — Drag to select region, clip only that area
+- Max 5 minutes per clip — Auto-stops at 300 seconds
+- Timeline Trim — Drag In/Out handles to set trim points
+- Video Preview — Play/pause, scrub, mute controls
+- Download as MP4
+
+[![Install](https://img.shields.io/badge/Install%20Now-v0.1.1-blue?style=flat-square&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js)
+
+Upcoming:
+- Keyboard Shortcuts
+- Simultaneous Recordings
+- Multicam Recordings
 
 ---
 
