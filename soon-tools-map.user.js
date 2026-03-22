@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Map
 // @namespace    https://fishtank.news
-// @version      2.2.2
+// @version      2.2.3
 // @description  Interactive floorplan map for fishtank.live — click any room to switch cam, syncs with the tab bar. By fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -141,14 +141,14 @@
     if (_zonesFetching) return;
     _zonesFetching = true;
     removeZoneOverlay();
-    const zones = await fetchZones(slug);
-    _zonesFetching = false;
+    let zones = [];
+    try { zones = await fetchZones(slug); } finally { _zonesFetching = false; }
     if (!zones.length) return;
     const vid = getVideoEl();
     if (!vid) return;
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
-    svg.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:9999;overflow:visible;';
+    // svg style set after appending to video parent
     const T = getTheme();
     for (const zone of zones) {
       if (zone.action?.name !== 'Change Live Stream') continue;
@@ -159,46 +159,69 @@
       g.dataset.targetSlug = targetSlug;
       g.dataset.normPoints = zone.points;
       const vis = document.createElementNS(NS, 'polygon');
-      vis.style.cssText = `fill:${T.primary};opacity:0;stroke:${T.primary};stroke-width:1.5;pointer-events:none;transition:opacity 0.15s;`;
+      vis.style.cssText = `fill:${T.primary};opacity:0;stroke:${T.primary};stroke-width:1.5;transition:opacity 0.15s;`;
+      vis.setAttribute('pointer-events', 'none');
       const hit = document.createElementNS(NS, 'polygon');
       hit.setAttribute('data-target-slug', targetSlug);
-      hit.style.cssText = 'fill:transparent;stroke:none;cursor:pointer;pointer-events:all;';
+      hit.style.cssText = 'fill:transparent;stroke:none;cursor:pointer;';
+      hit.setAttribute('pointer-events', 'all');
       hit.addEventListener('mouseenter', () => { vis.style.opacity = '0.35'; });
       hit.addEventListener('mouseleave', () => { vis.style.opacity = '0'; });
       hit.addEventListener('click', (e) => {
         e.stopPropagation();
-        // Find room by slug and select it directly
         const targetRoom = ROOMS.find(r => r.slug === targetSlug);
         if (targetRoom) {
-          onRoomSelected(targetRoom.id);
+          // Update map and switch stream without tearing down the zone overlay
+          fpActiveRoom = targetRoom.id;
+          if (targetRoom.floor && targetRoom.floor !== fpFloor) {
+            fpFloor = targetRoom.floor;
+            fpRebuildSVG();
+          } else {
+            if (fpMapEl) {
+              fpMapEl.querySelectorAll('[id^="ftfp-fill-"]').forEach(f => {
+                const id = f.id.replace('ftfp-fill-','');
+                f.setAttribute('fill', id === fpActiveRoom ? FP_FILL_ACTIVE : 'transparent');
+                f.setAttribute('opacity', id === fpActiveRoom ? '0.45' : '0');
+              });
+            }
+            if (fpBuildLabelsRef) fpBuildLabelsRef();
+          }
+          fpClickTab(targetRoom.id);
+          clipApplyRoomStream(targetRoom.id);
+          // Refresh zone overlay for the new room after a short delay
+          setTimeout(() => {
+            removeZoneOverlay();
+            if (targetRoom.slug) showZoneOverlay(targetRoom.slug);
+          }, 500);
         } else {
-          // Fallback to switchToSlug for alt cams not in ROOMS by slug
           switchToSlug(targetSlug);
         }
       });
       g.appendChild(vis); g.appendChild(hit);
       svg.appendChild(g);
     }
-    document.body.appendChild(svg);
+    // Insert SVG inside the video's parent so it's naturally clipped by the
+    // video container and sits under the player controls in normal stacking order
+    const vidParent = vid.parentElement;
+    if (!vidParent) { _zonesFetching = false; return; }
+    const vidParentPos = getComputedStyle(vidParent).position;
+    if (vidParentPos === 'static') vidParent.style.position = 'relative';
+    svg.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:hidden;';
+    vidParent.appendChild(svg);
     _zoneOverlay = svg;
     _activeSlug = slug;
-    const reposition = () => {
-      if (!_zoneOverlay || _zoneOverlay !== svg) return;
-      const r = vid.getBoundingClientRect();
-      if (!r.width) { requestAnimationFrame(reposition); return; }
-      for (const g of svg.querySelectorAll('g[data-norm-points]')) {
-        const pts = parseZonePoints(g.dataset.normPoints);
-        const screenPts = pts.map(p => `${r.left + p.x * r.width},${r.top + p.y * r.height}`).join(' ');
-        const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-        const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-        const scx = r.left + cx * r.width;
-        const scy = r.top  + cy * r.height;
-        g.querySelector('polygon:nth-of-type(1)').setAttribute('points', screenPts);
-        g.querySelector('polygon:nth-of-type(2)').setAttribute('points', screenPts);
-      }
-      requestAnimationFrame(reposition);
-    };
-    requestAnimationFrame(reposition);
+    // No reposition loop needed — SVG is positioned relative to video parent
+    // Polygon coords are 0-1 normalized to video frame, use % via viewBox
+    svg.setAttribute('viewBox', '0 0 1 1');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    for (const g of svg.querySelectorAll('g[data-norm-points]')) {
+      const pts = parseZonePoints(g.dataset.normPoints);
+      const ptStr = pts.map(p => `${p.x},${p.y}`).join(' ');
+      g.querySelector('polygon:nth-of-type(1)').setAttribute('points', ptStr);
+      g.querySelector('polygon:nth-of-type(2)').setAttribute('points', ptStr);
+      // stroke-width in viewBox 0-1 space needs to be tiny
+      g.querySelector('polygon:nth-of-type(1)').style.strokeWidth = '0.003';
+    }
   }
 
   const ALT_CAMERAS = {
@@ -325,7 +348,6 @@
   let fpInjected       = false;
   let offlineRooms     = new Set();
   let fpBuildLabelsRef = null;
-  let _svgTextCache    = null;
   let _streamsLoaded   = false;
   let allStreams        = [];
   let playbackId = null, streamName = null, streamId = null;
@@ -440,190 +462,107 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   function fpBuildSVG() {
-    const NS = 'http://www.w3.org/2000/svg';
     const isDown = fpFloor === 'down';
-    const VB = isDown ? '0 0 1314 620' : '250 760 781 300';
-    const svg = document.createElementNS(NS, 'svg');
-    svg.setAttribute('viewBox', VB);
-    svg.style.cssText = 'width:100%;display:block;cursor:default;background:transparent;';
+    const imgUrl = isDown
+      ? 'https://cdn.fishtank.live/images/map/s5/lower.png'
+      : 'https://cdn.fishtank.live/images/map/s5/upper.png';
 
-    function mk(tag, attrs) {
-      const el = document.createElementNS(NS, tag);
-      for (const [k,v] of Object.entries(attrs)) el.setAttribute(k, String(v));
-      return el;
-    }
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;width:100%;line-height:0;';
 
-    // ── SVG map image ───────────────────────────────────────────────────────
-    const _svgUrl = 'https://raw.githubusercontent.com/michaety/soontools/main/fishtank-floorplan.drawio.svg';
-    const _imgPlaceholder = mk('rect', {x:0, y:0, width:1314, height:1419, fill:'#dddec4'});
-    svg.appendChild(_imgPlaceholder);
+    // ── Map image ──────────────────────────────────────────────────────────
+    const img = document.createElement('img');
+    img.src = imgUrl;
+    img.style.cssText = 'width:100%;height:auto;display:block;mix-blend-mode:darken;pointer-events:none;';
+    wrap.appendChild(img);
 
-    const _doEmbed = (svgText) => {
-      const stripped = svgText
-        .replace(/(<svg[^>]*) style="[^"]*"/g, '$1 style="background:transparent"')
-        .replace(/<rect[^>]*width="100%"[^>]*\/>/g, '');
-      const parser = new DOMParser();
-      const svgDoc = parser.parseFromString(stripped, 'image/svg+xml');
-      const inner = svgDoc.documentElement;
-      inner.removeAttribute('style');
-      inner.style.background = 'transparent';
-      inner.style.mixBlendMode = 'multiply';
-      [...inner.querySelectorAll('rect')].forEach(r => {
-        if (r.getAttribute('width') === '100%' || r.getAttribute('height') === '100%') r.remove();
-      });
-      inner.setAttribute('width', '1314');
-      inner.setAttribute('height', '1419');
-      inner.style.cssText = 'pointer-events:none;overflow:visible;';
-      if (_imgPlaceholder.parentNode) _imgPlaceholder.parentNode.replaceChild(inner, _imgPlaceholder);
-    };
+    // ── Room hit zones ─────────────────────────────────────────────────────
+    // Positions derived from fishtank's own map HTML
+    const ZONES_DOWN = [
+      { id:'GLASS',  pos:'top:3.9%;left:20.4%;width:20.4%;height:35.3%' },
+      { id:'FOYER',  pos:'top:3.9%;left:40.8%;width:18.4%;height:35.3%' },
+      { id:'MARKET', pos:'top:3.9%;left:59.1%;width:10.2%;height:27.5%' },
+      { id:'JACUZ',  pos:'top:3.9%;left:69.3%;width:10.9%;height:27.5%' },
+      { id:'HALLD',  pos:'top:39.2%;left:40.8%;width:39.4%;height:11.8%' },
+      { id:'DINING', pos:'top:51.0%;left:2.0%;width:18.4%;height:47.1%' },
+      { id:'KITCH',  pos:'top:51.0%;left:20.4%;width:20.4%;height:47.1%' },
+      { id:'BAR',    pos:'top:51.0%;left:40.8%;width:20.4%;height:47.1%' },
+      { id:'CLOS',   pos:'top:66.7%;left:61.2%;width:8.2%;height:19.6%' },
+      { id:'DORM',   pos:'top:51.0%;left:69.3%;width:29.9%;height:47.1%' },
+      { id:'BPTZ',   pos:'top:51.0%;left:40.8%;width:8%;height:15%',      isSub:true },
+      { id:'BALT',   pos:'top:51.0%;left:49%;width:8%;height:15%',        isSub:true },
+      { id:'DALT',   pos:'top:51.0%;left:69.3%;width:8%;height:13%',      isSub:true },
+      { id:'MALT',   pos:'top:3.9%;left:59.1%;width:8%;height:11%',       isSub:true },
+    ];
+    const ZONES_UP = [
+      { id:'JNDL',   pos:'top:3.9%;left:2.0%;width:38.7%;height:47.1%'  },
+      { id:'BALC',   pos:'top:3.9%;left:59.1%;width:21.1%;height:47.1%' },
+      { id:'CORR',   pos:'top:51.0%;left:2.0%;width:18.4%;height:47.1%' },
+      { id:'HALLU',  pos:'top:51.0%;left:20.4%;width:38.7%;height:47.1%' },
+      { id:'CONF',   pos:'top:51.0%;left:59.1%;width:21.1%;height:47.1%' },
+    ];
+    // Stair zones
+    const STAIRS_DOWN = [
+      'top:3.9%;left:38.7%;width:12.9%;height:31.4%',
+    ];
+    const STAIRS_UP = [
+      'top:3.9%;left:36.7%;width:22.4%;height:47.1%',
+      'top:51.0%;left:2.0%;width:14.3%;height:15.7%',
+    ];
 
-    if (_svgTextCache) {
-      _doEmbed(_svgTextCache);
-    } else {
-      gmFetch(_svgUrl).then(r => r.text()).then(svgText => {
-        _svgTextCache = svgText;
-        _doEmbed(svgText);
-      }).catch(() => {
-        const imgEl = mk('image', {href:_svgUrl, x:0, y:0, width:1314, height:1419, preserveAspectRatio:'xMinYMin meet'});
-        imgEl.style.pointerEvents = 'none';
-        imgEl.style.mixBlendMode = 'multiply';
-        if (_imgPlaceholder.parentNode) _imgPlaceholder.parentNode.replaceChild(imgEl, _imgPlaceholder);
-      });
-    }
+    const zones = isDown ? ZONES_DOWN : ZONES_UP;
+    const stairs = isDown ? STAIRS_DOWN : STAIRS_UP;
 
-    // ── Dark room fills (drawn before image so walls render on top) ─────────
-    const DARK = 'var(--base-dark,#191c20)';
-    function addBase(x, y, w, h) { svg.appendChild(mk('rect', {x, y, width:w, height:h, fill:DARK})); }
-    if (isDown) {
-      addBase( 310,  10, 230, 290); // Glass Room
-      addBase( 542,  10, 169, 130); // Foyer top-left
-      addBase( 601, 140, 109, 110); // Foyer bottom
-      addBase( 711,  10,  89, 300); // Foyer right
-      addBase( 811,  80, 109, 120); // Market
-      addBase(1211, 211,  89,  99); // Jacuzzi
-      addBase( 550, 310, 560,  60); // Hallway Down
-      addBase( 300, 310, 240, 280); // Kitchen
-      addBase(  10, 370, 290, 220); // Dining
-      addBase( 550, 380, 310, 210); // Bar
-      addBase(1050, 480,  50,  70); // Closet
-      addBase(1100, 310, 200, 280); // Dorm
-    } else {
-      addBase( 260, 800,  80,  87); // Jungle
-      addBase( 260, 887,  80,  83); // Corridor
-      addBase( 400, 803, 100,  87); // Confessional
-      addBase( 340, 800, 163,  87); // Gap jungle-to-stairs top
-      addBase( 340, 828, 163,  59); // Left of upper staircase
-      addBase( 341, 890, 479,  82); // Hallway Up
-      addBase( 630, 892, 100,  80); // Balcony
-      addBase( 730, 883, 180,  80); // Gap balcony-to-right
-      addBase( 823, 770,  80, 110); // ???2
-      addBase( 910, 883, 111,  80); // ???1
-      addBase( 401, 979,  99,  80); // ???3
-    }
+    for (const z of zones) {
+      const isOff = offlineRooms.has(z.id);
+      const isActive = fpActiveRoom === z.id;
+      const btn = document.createElement('div');
+      btn.id = 'ftfp-fill-' + z.id;
+      btn.style.cssText = [
+        'position:absolute', z.pos,
+        'display:flex', 'align-items:center', 'justify-content:center',
+        'border-radius:2px',
+        'transition:background 0.12s,opacity 0.12s',
+        isOff    ? 'background:rgba(0,0,0,0.35);cursor:default;' :
+        isActive ? 'background:color-mix(in srgb,var(--base-primary,#df4e1e) 35%,transparent);cursor:pointer;' :
+                   'background:transparent;cursor:pointer;',
+      ].join(';');
 
-    // ── Active/offline highlight fills ─────────────────────────────────────
-    function addFill(id, x, y, w, h, isOffline) {
-      const fill    = isOffline ? FP_FILL_OFFLINE : fpActiveRoom === id ? FP_FILL_ACTIVE : 'transparent';
-      const opacity = (isOffline || fpActiveRoom === id) ? '0.45' : '0';
-      const r = mk('rect', {id:'ftfp-fill-'+id, x, y, width:w, height:h, fill, opacity});
-      r.style.transition = 'fill 0.12s, opacity 0.12s';
-      svg.appendChild(r);
-    }
-    if (isDown) {
-      addFill('GLASS',  310,  10, 230, 290, offlineRooms.has('GLASS'));
-      addFill('FOYER',  542,  10, 258, 190, offlineRooms.has('FOYER'));
-      addFill('MARKET', 811,  80, 109, 120, offlineRooms.has('MARKET'));
-      addFill('JACUZ', 1211, 211,  89,  99, offlineRooms.has('JACUZ'));
-      addFill('HALLD',  540, 300, 560,  80, offlineRooms.has('HALLD'));
-      addFill('DINING',  10, 370, 290, 220, offlineRooms.has('DINING'));
-      addFill('KITCH',  300, 310, 240, 280, offlineRooms.has('KITCH'));
-      addFill('BAR',    550, 380, 310, 210, offlineRooms.has('BAR'));
-      addFill('BPTZ',   550, 451,  70,  68, offlineRooms.has('BPTZ'));
-      addFill('CLOS',  1050, 480,  50,  70, offlineRooms.has('CLOS'));
-      addFill('DORM',  1100, 310, 200, 280, offlineRooms.has('DORM'));
-      addFill('DALT',  1100, 310,  70,  70, offlineRooms.has('DALT'));
-      addFill('MALT',   860, 150,  60,  60, offlineRooms.has('MALT'));
-      addFill('BALT',   670, 520,  80,  70, offlineRooms.has('BALT'));
-    } else {
-      addFill('CONF',  260, 800,  80,  87, offlineRooms.has('CONF'));
-      addFill('CORR',  260, 887,  80,  83, offlineRooms.has('CORR'));
-      addFill('JNDL',  400, 803, 100,  87, offlineRooms.has('JNDL'));
-      addFill('HALLU', 341, 890, 289,  82, offlineRooms.has('HALLU'));
-      addFill('BALC',  630, 892, 190,  80, offlineRooms.has('BALC'));
-    }
-
-    // ── Invisible hit zones for mouse interaction ───────────────────────────
-    function addHit(id, x, y, w, h) {
-      const isOff = offlineRooms.has(id);
-      const r = mk('rect', {x, y, width:w, height:h, fill:'transparent'});
       if (!isOff) {
-        r.style.cursor = 'pointer';
-        r.addEventListener('mouseenter', () => {
-          const f = document.getElementById('ftfp-fill-'+id);
-          if (f && fpActiveRoom !== id) { f.setAttribute('fill', FP_FILL_HOVER); f.setAttribute('opacity', '0.35'); }
+        btn.addEventListener('mouseenter', () => {
+          if (fpActiveRoom !== z.id) btn.style.background = 'color-mix(in srgb,var(--base-primary,#df4e1e) 20%,transparent)';
         });
-        r.addEventListener('mouseleave', () => {
-          const f = document.getElementById('ftfp-fill-'+id);
-          if (f && fpActiveRoom !== id) { f.setAttribute('fill', 'transparent'); f.setAttribute('opacity', '0'); }
+        btn.addEventListener('mouseleave', () => {
+          if (fpActiveRoom !== z.id) btn.style.background = 'transparent';
         });
-        r.addEventListener('click', () => {
-          if (id in ALT_CAMERAS) {
-            const room = ROOMS.find(r => r.id === id);
+        btn.addEventListener('click', () => {
+          if (z.id in ALT_CAMERAS) {
+            const room = ROOMS.find(r => r.id === z.id);
             if (room?.slug) switchToSlug(room.slug);
           } else {
-            onRoomSelected(id);
+            onRoomSelected(z.id);
           }
         });
       }
-      svg.appendChild(r);
-    }
-    if (isDown) {
-      addHit('GLASS',  310,  10, 230, 290);
-      addHit('FOYER',  542,  10, 258, 190);
-      addHit('MALT',   860, 150,  60,  60);
-      addHit('MARKET', 811,  80, 109, 120);
-      addHit('JACUZ', 1211, 211,  89,  99);
-      addHit('HALLD',  540, 300, 560,  80);
-      addHit('DINING',  10, 370, 290, 220);
-      addHit('KITCH',  300, 310, 240, 280);
-      addHit('BALT',   670, 520,  80,  70);
-      addHit('BAR',    550, 380, 310, 210);
-      addHit('BPTZ',   550, 451,  70,  68);
-      addHit('CLOS',  1050, 480,  50,  70);
-      addHit('DALT',  1100, 310,  70,  70);
-      addHit('DORM',  1100, 310, 200, 280);
-    } else {
-      addHit('CONF',  260, 800,  80,  87);
-      addHit('CORR',  260, 887,  80,  83);
-      addHit('JNDL',  400, 803, 100,  87);
-      addHit('HALLU', 341, 890, 289,  82);
-      addHit('BALC',  630, 892, 190,  80);
+      wrap.appendChild(btn);
     }
 
-    // ── Stair click zones (switch floors) ──────────────────────────────────
-    function addStair(x, y, w, h) {
-      const r = mk('rect', {x, y, width:w, height:h, fill:'transparent'});
-      r.style.cursor = 'pointer';
-      r.addEventListener('mouseenter', () => r.setAttribute('fill', 'rgba(0,0,0,0.09)'));
-      r.addEventListener('mouseleave', () => r.setAttribute('fill', 'transparent'));
-      r.addEventListener('click', (e) => {
+    // Stair zones
+    for (const pos of stairs) {
+      const btn = document.createElement('div');
+      btn.style.cssText = `position:absolute;${pos};cursor:pointer;border-radius:2px;transition:background 0.12s;`;
+      btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(255,255,255,0.15)');
+      btn.addEventListener('mouseleave', () => btn.style.background = 'transparent');
+      btn.addEventListener('click', (e) => {
         e.stopPropagation();
         fpFloor = isDown ? 'up' : 'down';
         fpRebuildSVG();
         if (fpBuildLabelsRef) fpBuildLabelsRef();
       });
-      svg.appendChild(r);
-    }
-    if (isDown) {
-      addStair(489, 199,  52, 160);
-      addStair(545, 250, 160,  55);
-      addStair( 10, 311, 290,  59);
-    } else {
-      addStair(503, 828, 250,  59);
-      addStair(264, 977,  86,  59);
+      wrap.appendChild(btn);
     }
 
-    return svg;
+    return wrap;
   }
 
   function fpRebuildSVG() {
@@ -738,7 +677,8 @@
         toggleBtn.textContent = 'MAP';
         dirBtn.style.display = 'none';
         minimiseBtn.style.display = 'none';
-        fpContainer.style.cssText = '';
+        // Restore fishtank's tab bar to visible
+        fpContainer.style.cssText = 'position:relative;left:auto;top:auto;opacity:1;pointer-events:auto;height:auto;overflow:visible;visibility:visible;';
       }
     });
 
@@ -761,29 +701,29 @@
     overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:2;';
 
     const LABELS_DOWN = [
-      ['GLASS',   'GLASS ROOM',  23.6,  1.6, 17.5, 46.8],
-      ['FOYER',   'FOYER',       41.2,  1.6, 19.6, 48.4],
-      ['MARKET',  'MAR',         61.7, 12.9,  8.3, 19.4],
-      ['JACUZ',   'JAC',         92.2, 34.0,  6.8, 16.0],
-      ['HALLD',   'HALLWAY',     41.2, 51.6, 42.6,  9.7],
-      ['DINING',  'DINING',       0.8, 59.7, 22.1, 35.5],
-      ['KITCH',   'KITCHEN',     22.8, 50.0, 18.3, 45.2],
-      ['BAR',     'BAR',         41.9, 61.3, 23.6, 33.9],
-      ['CLOS',    'CLO',         79.9, 77.4,  5.5, 11.3],
-      ['BPTZ',    'PTZ',         41.9, 72.7,  5.3, 11.0, true],
-      ['BALT',    'ALT',         51.0, 83.9,  6.1, 11.3, true],
-      ['DALT',    'ALT',         83.7, 50.0,  5.3, 11.3, true],
-      ['MALT',    'ALT',         65.5, 22.6,  4.6,  9.7, true],
-      ['DORM',    'DORM',        83.7, 50.0, 15.2, 45.2],
-      ['_STRS1b', '',            41.5, 40.3, 12.2,  8.9, true],
+      ['GLASS',   'GLASS ROOM',  20.4,  3.9, 20.4, 35.3],
+      ['FOYER',   'FOYER',       40.8,  3.9, 18.4, 35.3],
+      ['MARKET',  'MAR',         59.1,  3.9, 10.2, 27.5],
+      ['JACUZ',   'JAC',         69.3,  3.9, 10.9, 27.5],
+      ['HALLD',   'HALLWAY',     40.8, 39.2, 39.4, 11.8],
+      ['DINING',  'DINING',       2.0, 51.0, 18.4, 47.1],
+      ['KITCH',   'KITCHEN',     20.4, 51.0, 20.4, 47.1],
+      ['BAR',     'BAR',         40.8, 51.0, 20.4, 47.1],
+      ['CLOS',    'CLO',         61.2, 66.7,  8.2, 19.6],
+      ['BPTZ',    'PTZ',         40.8, 51.0,  8.0, 15.0, true],
+      ['BALT',    'ALT',         49.0, 51.0,  8.0, 15.0, true],
+      ['DALT',    'ALT',         69.3, 51.0,  8.0, 13.0, true],
+      ['MALT',    'ALT',         59.1,  3.9,  8.0, 11.0, true],
+      ['DORM',    'DORM',        69.3, 51.0, 29.9, 47.1],
+      ['_STRS1b', '',            38.7,  3.9, 12.9, 31.4, true],
     ];
     const LABELS_UP = [
-      ['CONF',    'CON',          1.3, 13.3, 10.2, 29.0],
-      ['CORR',    'COR',          1.3, 42.3, 10.2, 27.7],
-      ['JNDL',    'JUNGLE',      19.2, 14.3, 12.8, 29.0],
-      ['HALLU',   'WEST WING',   11.7, 43.3, 37.0, 27.3],
-      ['BALC',    'EAST WING',   48.7, 44.0, 24.3, 26.7],
-      ['_STRS1',  '',            32.4, 22.7, 32.0, 19.7, true],
+      ['JNDL',    'JUNGLE',       2.0,  3.9, 38.7, 47.1],
+      ['BALC',    'EAST WING',   59.1,  3.9, 21.1, 47.1],
+      ['CORR',    'COR',          2.0, 51.0, 18.4, 47.1],
+      ['HALLU',   'WEST WING',   20.4, 51.0, 38.7, 47.1],
+      ['CONF',    'CON',         59.1, 51.0, 21.1, 47.1],
+      ['_STRS1',  '',            36.7,  3.9, 22.4, 47.1, true],
     ];
 
     function fpBuildLabels() {
@@ -874,7 +814,7 @@
     fpRightGroup2.style.cssText = 'display:flex;align-items:center;gap:5px;margin-left:auto;flex-shrink:0;';
 
     const mapWrap = document.createElement('div');
-    mapWrap.style.cssText = 'position:relative;width:100%;line-height:0;background:var(--base-light,#dddec4);border-radius:0 0 4px 4px;overflow:hidden;';
+    mapWrap.style.cssText = 'position:relative;width:100%;line-height:0;background:var(--base-dark,#191c20);border-radius:0 0 4px 4px;overflow:hidden;';
     fpMapWrap = mapWrap;
     mapWrap.appendChild(fpMapEl);
     mapWrap.appendChild(overlay);
@@ -885,7 +825,7 @@
 
     fpContainer.parentElement.insertBefore(wrapper, fpContainer);
     fpInjected = true;
-    console.log('[SOON] Floorplan injected v2.2.1');
+    console.log('[SOON] Floorplan injected v2.2.2');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -978,7 +918,7 @@
     });
     removalObs.observe(document.body, { childList: true, subtree: true });
 
-    console.log('[SOON] Soon Map v2.2.1 ready');
+    console.log('[SOON] Soon Map v2.2.2 ready');
   }
 
   if (document.readyState !== 'loading') init();
