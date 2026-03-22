@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Map
 // @namespace    https://fishtank.news
-// @version      2.2.2
+// @version      2.2.4
 // @description  Interactive floorplan map for fishtank.live — click any room to switch cam, syncs with the tab bar. By fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -141,14 +141,14 @@
     if (_zonesFetching) return;
     _zonesFetching = true;
     removeZoneOverlay();
-    const zones = await fetchZones(slug);
-    _zonesFetching = false;
+    let zones = [];
+    try { zones = await fetchZones(slug); } finally { _zonesFetching = false; }
     if (!zones.length) return;
     const vid = getVideoEl();
     if (!vid) return;
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
-    svg.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:9999;overflow:visible;';
+    svg.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:10;overflow:visible;';
     const T = getTheme();
     for (const zone of zones) {
       if (zone.action?.name !== 'Change Live Stream') continue;
@@ -159,46 +159,59 @@
       g.dataset.targetSlug = targetSlug;
       g.dataset.normPoints = zone.points;
       const vis = document.createElementNS(NS, 'polygon');
-      vis.style.cssText = `fill:${T.primary};opacity:0;stroke:${T.primary};stroke-width:1.5;pointer-events:none;transition:opacity 0.15s;`;
+      vis.style.cssText = `fill:${T.primary};opacity:0;stroke:${T.primary};stroke-width:1.5;transition:opacity 0.15s;`;
+      vis.setAttribute('pointer-events', 'none');
       const hit = document.createElementNS(NS, 'polygon');
       hit.setAttribute('data-target-slug', targetSlug);
-      hit.style.cssText = 'fill:transparent;stroke:none;cursor:pointer;pointer-events:all;';
+      hit.style.cssText = 'fill:transparent;stroke:none;cursor:pointer;';
+      hit.setAttribute('pointer-events', 'all');
       hit.addEventListener('mouseenter', () => { vis.style.opacity = '0.35'; });
       hit.addEventListener('mouseleave', () => { vis.style.opacity = '0'; });
       hit.addEventListener('click', (e) => {
         e.stopPropagation();
-        // Find room by slug and select it directly
         const targetRoom = ROOMS.find(r => r.slug === targetSlug);
         if (targetRoom) {
-          onRoomSelected(targetRoom.id);
+          fpActiveRoom = targetRoom.id;
+          if (targetRoom.floor && targetRoom.floor !== fpFloor) {
+            fpFloor = targetRoom.floor;
+            fpRebuildSVG();
+          } else {
+            if (fpMapEl) {
+              fpMapEl.querySelectorAll('[id^="ftfp-fill-"]').forEach(f => {
+                const id = f.id.replace('ftfp-fill-','');
+                f.setAttribute('fill', id === fpActiveRoom ? FP_FILL_ACTIVE : 'transparent');
+                f.setAttribute('opacity', id === fpActiveRoom ? '0.45' : '0');
+              });
+            }
+            if (fpBuildLabelsRef) fpBuildLabelsRef();
+          }
+          fpClickTab(targetRoom.id);
+          clipApplyRoomStream(targetRoom.id);
+          setTimeout(() => { removeZoneOverlay(); if (targetRoom.slug) showZoneOverlay(targetRoom.slug); }, 500);
         } else {
-          // Fallback to switchToSlug for alt cams not in ROOMS by slug
           switchToSlug(targetSlug);
         }
       });
       g.appendChild(vis); g.appendChild(hit);
       svg.appendChild(g);
     }
-    document.body.appendChild(svg);
+    // Append inside video parent — sits under player controls, no reposition loop needed
+    const vidParent = vid.parentElement;
+    if (!vidParent) { _zonesFetching = false; return; }
+    if (getComputedStyle(vidParent).position === 'static') vidParent.style.position = 'relative';
+    svg.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:hidden;';
+    svg.setAttribute('viewBox', '0 0 1 1');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    for (const g of svg.querySelectorAll('g[data-norm-points]')) {
+      const pts = parseZonePoints(g.dataset.normPoints);
+      const ptStr = pts.map(p => `${p.x},${p.y}`).join(' ');
+      g.querySelector('polygon:nth-of-type(1)').setAttribute('points', ptStr);
+      g.querySelector('polygon:nth-of-type(2)').setAttribute('points', ptStr);
+      g.querySelector('polygon:nth-of-type(1)').style.strokeWidth = '0.003';
+    }
+    vidParent.appendChild(svg);
     _zoneOverlay = svg;
     _activeSlug = slug;
-    const reposition = () => {
-      if (!_zoneOverlay || _zoneOverlay !== svg) return;
-      const r = vid.getBoundingClientRect();
-      if (!r.width) { requestAnimationFrame(reposition); return; }
-      for (const g of svg.querySelectorAll('g[data-norm-points]')) {
-        const pts = parseZonePoints(g.dataset.normPoints);
-        const screenPts = pts.map(p => `${r.left + p.x * r.width},${r.top + p.y * r.height}`).join(' ');
-        const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-        const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-        const scx = r.left + cx * r.width;
-        const scy = r.top  + cy * r.height;
-        g.querySelector('polygon:nth-of-type(1)').setAttribute('points', screenPts);
-        g.querySelector('polygon:nth-of-type(2)').setAttribute('points', screenPts);
-      }
-      requestAnimationFrame(reposition);
-    };
-    requestAnimationFrame(reposition);
   }
 
   const ALT_CAMERAS = {
@@ -255,7 +268,7 @@
         _switchingSlug = slug;
         clickPolygonCentre(polygon);
         _activeSlug = slug;
-        showZoneOverlay(slug);
+      // showZoneOverlay(slug); // disabled
         window.SOON = window.SOON || {};
         window.SOON.activeSlug = slug;
         window.SOON.activeM3u8 = slugToM3u8(slug);
@@ -378,7 +391,7 @@
     clipApplyRoomStream(roomId);
     removeZoneOverlay();
     if (room?.slug) {
-      showZoneOverlay(room.slug);
+      // showZoneOverlay(room.slug); // disabled
       window.SOON = window.SOON || {};
       window.SOON.activeRoomId = roomId;
       window.SOON.activeRoom   = room;
@@ -883,9 +896,9 @@
     wrapper.appendChild(dirBtn);
     wrapper.appendChild(mapWrap);
 
+    fpInjected = true; // set BEFORE DOM insertion to prevent re-entry
     fpContainer.parentElement.insertBefore(wrapper, fpContainer);
-    fpInjected = true;
-    console.log('[SOON] Floorplan injected v2.2.1');
+    console.log('[SOON] Floorplan injected v2.2.3');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -958,7 +971,7 @@
             if (room.floor && room.floor !== fpFloor) fpFloor = room.floor;
             fpRebuildSVG();
             clipApplyRoomStream(room.id);
-            if (room.slug) showZoneOverlay(room.slug);
+            // if (room.slug) showZoneOverlay(room.slug); // disabled
             break;
           }
         }
@@ -969,16 +982,80 @@
     fpCheckOfflineFromDOM();
     setInterval(fpCheckOfflineFromDOM, 3000);
 
+    // Watch for stream changes by polling HLS segment requests
+    let _lastDetectedSlug = null;
+    setInterval(() => {
+      try {
+        const entries = (unsafeWindow || window).performance.getEntriesByType('resource');
+        // Look at recent entries (last 50) for HLS segments
+        const recent = entries.slice(-50);
+        for (let i = recent.length - 1; i >= 0; i--) {
+          const url = recent[i].name;
+          if (!url.includes('streams-') || !url.includes('.fishtank.live')) continue;
+          const m = url.match(/live\+([a-z0-9]+-\d+)/);
+          if (!m) continue;
+          const slug = m[1];
+          if (slug === _lastDetectedSlug) break;
+          _lastDetectedSlug = slug;
+          // Find room by slug
+          const room = ROOMS.find(r => r.slug === slug);
+          if (room && room.id !== fpActiveRoom) {
+            fpActiveRoom = room.id;
+            if (room.floor && room.floor !== fpFloor) {
+              fpFloor = room.floor;
+              fpRebuildSVG();
+            } else {
+              if (fpMapEl) fpMapEl.querySelectorAll('[id^="ftfp-fill-"]').forEach(f => {
+                const id = f.id.replace('ftfp-fill-','');
+                f.setAttribute('fill', id === fpActiveRoom ? FP_FILL_ACTIVE : 'transparent');
+                f.setAttribute('opacity', id === fpActiveRoom ? '0.45' : '0');
+              });
+              if (fpBuildLabelsRef) fpBuildLabelsRef();
+            }
+          }
+          break;
+        }
+      } catch(e) {}
+    }, 1000);
+
+    // Catch fishtank's own polygon navigation clicks to sync map
+    document.addEventListener('click', (e) => {
+      const el = e.target;
+      if (el.tagName !== 'polygon' && el.tagName !== 'POLYGON') return;
+      const slug = el.getAttribute('data-target-slug') ||
+                   el.closest('[data-target-slug]')?.getAttribute('data-target-slug');
+      if (!slug) return;
+      const room = ROOMS.find(r => r.slug === slug);
+      if (room) {
+        setTimeout(() => {
+          fpActiveRoom = room.id;
+          if (room.floor && room.floor !== fpFloor) {
+            fpFloor = room.floor; fpRebuildSVG();
+          } else {
+            if (fpMapEl) fpMapEl.querySelectorAll('[id^="ftfp-fill-"]').forEach(f => {
+              const id = f.id.replace('ftfp-fill-','');
+              f.setAttribute('fill', id === fpActiveRoom ? FP_FILL_ACTIVE : 'transparent');
+              f.setAttribute('opacity', id === fpActiveRoom ? '0.45' : '0');
+            });
+            if (fpBuildLabelsRef) fpBuildLabelsRef();
+          }
+        }, 300); // slight delay to let stream switch
+      } else {
+        // Unknown slug — sync via stream name after delay
+        setTimeout(() => syncMapToStream(slug), 800);
+      }
+    }, true);
+
     let _removalTimer = null;
     const removalObs = new MutationObserver(() => {
       clearTimeout(_removalTimer);
       _removalTimer = setTimeout(() => {
         if (!document.getElementById('ftfp-map')) { fpInjected = false; fpInject(); }
-      }, 500);
+      }, 1500);
     });
     removalObs.observe(document.body, { childList: true, subtree: true });
 
-    console.log('[SOON] Soon Map v2.2.1 ready');
+    console.log('[SOON] Soon Map v2.2.3 ready');
   }
 
   if (document.readyState !== 'loading') init();
