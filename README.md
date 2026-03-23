@@ -19,7 +19,7 @@ Navigate the house using an interactive architectural floorplan overlay. Click a
 - Inherits fishtank.live's theme — looks native
 - Toggle between Map and Tabs view at any time
 
-[![Install Map](https://img.shields.io/badge/Install%20Map-v2.2.2-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-map.user.js)
+[![Install Map](https://img.shields.io/badge/Install%20Map-v2.2.4-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-map.user.js)
 
 ---
 
@@ -34,14 +34,11 @@ Installation
 - Max 5 minutes per clip — Auto-stops at 300 seconds
 - Timeline Trim — Drag In/Out handles to set trim points
 - Video Preview — Play/pause, scrub, mute controls
+- Multicam Recordings
+- Keyboard Shortcuts
 - Download as MP4
 
-[![Install](https://img.shields.io/badge/Install%20Now-v0.1.1-blue?style=flat-square&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js)
-
-Upcoming:
-- Keyboard Shortcuts
-- Simultaneous Recordings
-- Multicam Recordings
+[![Install](https://img.shields.io/badge/Install%20Now-v1.3.1-blue?style=flat-square&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js)
 
 ---
 
