@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Soon Tools — Clip
+// @name         Soon Clipper
 // @namespace    https://fishtank.news
 // @version      1.3.0
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
