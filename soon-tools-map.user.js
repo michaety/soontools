@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Map
 // @namespace    https://fishtank.news
-// @version      3.2.4
+// @version      3.2.6
 // @description  Enhances Fishtank's native map — click any room to switch cam, syncs with stream. By fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -303,18 +303,21 @@
             firePolygonClick(poly);
             onRoomSelected(altId);
             console.log('[SOON] alt cam switched:', altId);
-            // Rapidly force map back to downstairs to prevent visible flash
-            // The zone polygon click can trigger Fishtank's floor switch
-            const forceDown = () => {
-              const mapImg = document.querySelector('img[src*="map/s5/"]');
-              if (mapImg && !mapImg.src.includes('lower')) {
-                const downBtn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Downstairs');
-                if (downBtn) { downBtn.click(); console.log('[SOON] forced map to downstairs'); }
-              }
-            };
-            // Check multiple times rapidly to catch the switch as early as possible
-            for (let ms = 50; ms <= 600; ms += 50) {
-              setTimeout(forceDown, ms);
+            // Use a MutationObserver to catch the map floor change the instant it happens
+            const mapImg = document.querySelector('img[src*="map/s5/"]');
+            if (mapImg) {
+              const floorGuard = new MutationObserver(() => {
+                if (mapImg.src && !mapImg.src.includes('lower')) {
+                  // Immediately revert the src to downstairs before the browser paints
+                  mapImg.src = mapImg.src.replace(/upper/, 'lower');
+                  const downBtn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Downstairs');
+                  if (downBtn) downBtn.click();
+                  console.log('[SOON] intercepted floor switch, reverted to downstairs');
+                }
+              });
+              floorGuard.observe(mapImg, { attributes: true, attributeFilter: ['src'] });
+              // Stop observing after 2 seconds
+              setTimeout(() => floorGuard.disconnect(), 2000);
             }
           } else {
             console.warn('[SOON] polygon disappeared before click for', altId);
@@ -558,6 +561,7 @@
           const room = ROOMS.find(r => r.tab && (text === r.tab || text === r.label));
           if (room) {
             onRoomSelected(room.id);
+            ensureMapFloor(room.floor);
             break;
           }
         }
@@ -584,7 +588,7 @@
     muteMapHoverSounds();
     loadStreams();
 
-    console.log('[SOON] Soon Map v3.2.4 ready');
+    console.log('[SOON] Soon Map v3.2.6 ready');
   }
 
   if (document.readyState !== 'loading') init();
