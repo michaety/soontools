@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Tools — Clip
 // @namespace    https://fishtank.news
-// @version      0.1.1
+// @version      1.3.0
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -10,7 +10,7 @@
 // @grant        unsafeWindow
 // @grant        GM_xmlhttpRequest
 // @connect      cdn.fishtank.live
-// @run-at       document-end
+// @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js
 // ==/UserScript==
@@ -26,13 +26,8 @@
   let pendingAction = null;
   let cropRegion    = null;
   let dragStart     = null;
-  let recorder      = null;
-  let recChunks     = [];
-  let recTimer      = null;
-  let recSeconds    = 0;
-  let recStartTime  = null;
-  let recording     = false;
   let mainVideoEl   = null;
+  let recording     = false; // kept in sync with activeSession for UI guards
 
   // Page-level WebAudio context and source cache
   // Must persist across recordings — browser only allows one MediaElementSource per element ever
@@ -91,8 +86,11 @@
     const ctx = canvas.getContext('2d');
     let drag = null, dashOffset = 0;
 
-    function updateCanvas() {
+    let lastOverlayDraw=0;
+    function updateCanvas(ts) {
       if (!document.getElementById('sc-crop-canvas')) return;
+      if(ts-lastOverlayDraw<33){requestAnimationFrame(updateCanvas);return;} // ~30fps
+      lastOverlayDraw=ts;
       const r = getVidRect();
       canvas.style.left = r.left+'px'; canvas.style.top = r.top+'px';
       canvas.width = Math.round(r.width); canvas.height = Math.round(r.height);
@@ -114,7 +112,7 @@
       }
       requestAnimationFrame(updateCanvas);
     }
-    updateCanvas();
+    updateCanvas(0);
 
     const hint = document.createElement('div');
     hint.id = 'sc-hint';
@@ -179,228 +177,343 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // ── RECORDING ──────────────────────────────────────────────────────────────
+  // ── RECORDING SESSION ──────────────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // All recording state is encapsulated in RecordingSession. No shared mutable
+  // state leaks between sessions — cam splits create a new instance cleanly.
+  //
+  // External API (used by UI and camWatcher):
+  //   session = new RecordingSession(cropRegion)
+  //   await session.start()   → throws if no video found
+  //   session.stop()          → triggers onstop → finaliseClip
+  //   session.destroy()       → immediate teardown, no clip saved
+  //   session.isActive        → true while recording
+  //   session.seconds         → elapsed seconds (for status display)
 
-  async function startRecording() {
-    const vid = getVideoEl();
-    if (!vid) { showStatus('No video found','err'); return; }
+  // Shared assets — fetched once per page session, reused across recordings
+  const _assets = { logoImg: null, logoReady: false };
 
-    // Use shared AudioContext — must persist across recordings
-    // Browser suspends AudioContext without user gesture, resume on record click
-    if (!sharedAudioCtx) sharedAudioCtx = new AudioContext();
-    if (sharedAudioCtx.state === 'suspended') await sharedAudioCtx.resume().catch(() => {});
+  function _loadAssets() {
+    if(!_assets.logoImg) {
+      const img = new Image();
+      GM_xmlhttpRequest({
+        method:'GET', url:'https://cdn.fishtank.live/images/logo/logo-stripe.png',
+        responseType:'blob',
+        onload: r => { img.onload = () => { _assets.logoReady = true; }; img.src = URL.createObjectURL(r.response); }
+      });
+      _assets.logoImg = img;
+    }
+  }
 
-    // Pre-load transition sound
-    let transitionSoundBuffer = null;
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: 'https://cdn.fishtank.live/sounds/chunk-short.mp3',
-      responseType: 'arraybuffer',
-      onload: r => {
-        sharedAudioCtx.decodeAudioData(r.response)
-          .then(decoded => { transitionSoundBuffer = decoded; })
-          .catch(() => {});
+  class RecordingSession {
+    constructor(cropRegion) {
+      this.cropRegion  = cropRegion || null;
+      this.isActive    = false;
+      this.seconds     = 0;
+      this._chunks     = [];
+      this._startTime  = null;
+      this._mimeType   = SUPPORTED_MIME;
+
+      // All owned resources — cleaned up in destroy()
+      this._canvas     = null;
+      this._ctx        = null;
+      this._stream     = null;
+      this._recorder   = null;
+      this._audioDst   = null;
+      this._audioNode  = null;
+      this._camWatcher = null;
+      this._recTimer   = null;
+      this._borderTimer= null;
+      this._autoStop   = null;
+      this._vid        = null;        // video element at session start
+      this._lastVid    = null;        // tracks current video for cam switch detection
+      this._lastSrc    = null;        // tracks src for split detection
+      this._staticFrames = 0;
+      this._splitDebounce = false;
+      this._goneCount  = 0;
+      this.multiCam    = false; // set true for continuous multi-cam mode
+      this._stopTime   = null;  // set in stop() to accurately calculate duration
+
+      // Offscreen canvas for static noise — created once per session
+      this._staticCanvas = document.createElement('canvas');
+      this._staticCanvas.width = 80; this._staticCanvas.height = 45;
+      this._staticCtx = this._staticCanvas.getContext('2d');
+
+      // rAF state
+      this._lastDrawTs = 0;
+      this._rafId      = null;
+    }
+
+    async start() {
+      const vid = getVideoEl();
+      if (!vid) throw new Error('No video found');
+      this._vid = vid;
+      this._lastVid = vid;
+      this._lastSrc = vid.currentSrc || vid.src;
+
+      // AudioContext — shared across sessions, must survive
+      if (!sharedAudioCtx) sharedAudioCtx = new AudioContext();
+      if (sharedAudioCtx.state === 'suspended') await sharedAudioCtx.resume().catch(() => {});
+      _loadAssets();
+
+      // Canvas
+      const vw = vid.videoWidth || 1920, vh = vid.videoHeight || 1080;
+      this._canvas = document.createElement('canvas');
+      this._canvas.width = vw; this._canvas.height = vh;
+      this._ctx = this._canvas.getContext('2d');
+
+      // Stream + audio
+      this._stream = this._canvas.captureStream(24);
+      this._connectAudio(vid);
+
+      // MediaRecorder
+      this._recorder = new MediaRecorder(this._stream, {
+        mimeType: this._mimeType,
+        videoBitsPerSecond: 4_000_000,
+        audioBitsPerSecond: 128_000
+      });
+      this._recorder.ondataavailable = e => { if (e.data.size > 0) this._chunks.push(e.data); };
+      this._recorder.onstop = () => this._onStop();
+      this._recorder.start(250);
+
+      this.isActive = true;
+      this._startTime = Date.now();
+
+      // Timers
+      this._recTimer = setInterval(() => {
+        if (!this.isActive) return;
+        this.seconds++;
+        showStatus('⏺ ' + formatDuration(this.seconds), 'rec');
+        if (UI.recIndicator) { UI.recIndicator.textContent = '⏺ ' + formatDuration(this.seconds); UI.recIndicator.style.display = ''; }
+        updateRecordBtn(false, true);
+      }, 1000);
+
+      this._borderTimer = setInterval(() => {
+        if (!this._vid) return;
+        if (!this.isActive) { this._vid.style.outline = ''; return; }
+        this._vid.style.outline = this.seconds % 2 === 0 ? '3px solid #df4e1e' : '3px solid #ff7043';
+        this._vid.style.outlineOffset = '-3px';
+      }, 1000);
+
+      this._autoStop = setTimeout(() => this.stop(), MAX_RECORD_SEC * 1000);
+      this._camWatcher = setInterval(() => this._watchCam(), 500);
+
+      if (this.cropRegion) showRecordingCropOverlay(vid, this.cropRegion);
+
+      // Start draw loop
+      this._rafId = requestAnimationFrame(ts => this._drawFrame(ts));
+
+      updateRecordBtn(false, true);
+      showStatus('Recording — press ⏹ to stop', 'rec');
+    }
+
+    stop() {
+      if (!this.isActive) return;
+      this.isActive = false; // stops drawFrame immediately — canvas freezes here
+      this._stopTime = Date.now(); // capture NOW before recorder flush delay
+      if (this._recorder?.state === 'recording' || this._recorder?.state === 'paused') {
+        // Flush current buffer first to minimise frozen frames in final chunk
+        try { this._recorder.requestData(); } catch {}
+        this._recorder.stop(); // triggers _onStop via onstop event
       }
-    });
+      showStatus('Processing…', 'loading');
+    }
 
-    const logoImg = new Image();
-    let logoReady = false;
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: 'https://cdn.fishtank.live/images/logo/logo-stripe.png',
-      responseType: 'blob',
-      onload: r => {
-        logoImg.onload = () => { logoReady = true; };
-        logoImg.src = URL.createObjectURL(r.response);
+    destroy() {
+      // Immediate teardown — no clip saved (used when session is superseded)
+      this.isActive = false;
+      this._destroyed = true; // suppress onstop → finaliseClip
+      this._clearTimers();
+      if (this._recorder?.state !== 'inactive') {
+        try { this._recorder.stop(); } catch {}
       }
-    });
+      this._teardownAudio();
+      if (this._vid) this._vid.style.outline = '';
+      document.getElementById('sc-rec-crop-overlay')?.remove();
+    }
 
-    const canvas = document.createElement('canvas');
-    canvas.width  = vid.videoWidth||1920;
-    canvas.height = vid.videoHeight||1080;
-    const ctx = canvas.getContext('2d');
+    _onStop() {
+      if (this._destroyed) return; // destroy() was called — don't save a clip
+      this._clearTimers();
+      this._teardownAudio();
+      if (this._vid) this._vid.style.outline = '';
+      this.isActive = false;
+      if (UI.recIndicator) UI.recIndicator.style.display = 'none';
+      updateRecordBtn(false, false);
+      document.getElementById('sc-rec-crop-overlay')?.remove();
 
-    // drawFrame tracks its own copy for rendering
-    let lastVid = vid, staticFrames = 0;
+      const endTime = this._stopTime || Date.now();
+      const durationSec = this._startTime
+        ? Math.max(1, Math.round((endTime - this._startTime) / 1000))
+        : Math.max(1, this.seconds || 1);
+      finaliseClip(this._mimeType, this._chunks, durationSec);
+    }
 
-    function playTransitionSound() {
-      if (!transitionSoundBuffer || !sharedAudioCtx) return;
+    _clearTimers() {
+      clearInterval(this._camWatcher);
+      clearInterval(this._recTimer);
+      clearInterval(this._borderTimer);
+      clearTimeout(this._autoStop);
+      this._camWatcher = this._recTimer = this._borderTimer = this._autoStop = null;
+    }
+
+    _connectAudio(vid) {
       try {
-        const src = sharedAudioCtx.createBufferSource();
-        src.buffer = transitionSoundBuffer;
-        src.connect(sharedAudioCtx.destination);
-        src.start();
-      } catch(e) {}
-    }
-
-    function drawStatic(w, h) {
-      const sw=80, sh=45;
-      const imageData=ctx.createImageData(sw,sh);
-      const data=imageData.data;
-      for (let i=0; i<data.length; i+=4) {
-        const v=Math.random()*180|0;
-        data[i]=v; data[i+1]=v; data[i+2]=v; data[i+3]=255;
-      }
-      const tmp=document.createElement('canvas');
-      tmp.width=sw; tmp.height=sh;
-      tmp.getContext('2d').putImageData(imageData,0,0);
-      ctx.imageSmoothingEnabled=false;
-      ctx.drawImage(tmp,0,0,w,h);
-      ctx.imageSmoothingEnabled=true;
-      if (logoReady && logoImg.naturalWidth>0) {
-        const logoW=Math.min(w*0.85,600);
-        const logoH=logoW*(logoImg.naturalHeight/logoImg.naturalWidth);
-        ctx.globalAlpha=0.9;
-        ctx.drawImage(logoImg,(w-logoW)/2,(h-logoH)/2,logoW,logoH);
-        ctx.globalAlpha=1;
-      } else {
-        ctx.fillStyle='rgba(0,0,0,0.55)';
-        ctx.fillRect(w/2-90,h/2-20,180,40);
-        ctx.fillStyle='white'; ctx.font='bold 15px sans-serif';
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('switching cam...',w/2,h/2);
-      }
-    }
-
-    function drawFrame() {
-      if (!recording) return;
-      const currentVid = getVideoEl();
-      if (!currentVid||currentVid.readyState<2) {
-        drawStatic(canvas.width,canvas.height);
-        requestAnimationFrame(drawFrame); return;
-      }
-      // Detect cam switch in drawFrame too — keeps lastVid in sync
-      if (currentVid!==lastVid) {
-        staticFrames=12;
-        lastVid=currentVid;
-        playTransitionSound();
-      }
-      if (staticFrames>0) {
-        drawStatic(canvas.width,canvas.height);
-        staticFrames--;
-        requestAnimationFrame(drawFrame); return;
-      }
-      if (cropRegion) {
-        const vw=currentVid.videoWidth||1920, vh=currentVid.videoHeight||1080;
-        const cw=Math.round(cropRegion.w*vw), ch=Math.round(cropRegion.h*vh);
-        if (canvas.width!==cw||canvas.height!==ch) { canvas.width=cw; canvas.height=ch; }
-        ctx.drawImage(currentVid,cropRegion.x*vw,cropRegion.y*vh,cropRegion.w*vw,cropRegion.h*vh,0,0,cw,ch);
-      } else {
-        const vw=currentVid.videoWidth||1920, vh=currentVid.videoHeight||1080;
-        if (canvas.width!==vw||canvas.height!==vh) { canvas.width=vw; canvas.height=vh; }
-        ctx.drawImage(currentVid,0,0,vw,vh);
-      }
-      requestAnimationFrame(drawFrame);
-    }
-    requestAnimationFrame(drawFrame);
-
-    const canvasStream = canvas.captureStream(30);
-
-    function connectAudio(v) {
-      try {
-        // Get or create the MediaElementSource for this element
-        // Browser only allows one per element ever — must reuse
-        let node = sharedAudioSources.get(v);
+        let node = sharedAudioSources.get(vid);
         if (!node) {
-          node = sharedAudioCtx.createMediaElementSource(v);
-          sharedAudioSources.set(v, node);
+          node = sharedAudioCtx.createMediaElementSource(vid);
+          sharedAudioSources.set(vid, node);
         }
-        // Create a new destination for this recording session
+        if (this._audioDst) { try { node.disconnect(this._audioDst); } catch {} }
         const dst = sharedAudioCtx.createMediaStreamDestination();
+        this._audioDst = dst;
+        this._audioNode = node;
         node.connect(dst);
-        node.connect(sharedAudioCtx.destination); // keep playing to speakers
-        // Replace audio tracks on the canvas stream
-        canvasStream.getAudioTracks().forEach(t => { canvasStream.removeTrack(t); t.stop(); });
-        dst.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
-        console.log('[SOON CLIP] Audio connected via WebAudio');
+        // Connect to speakers only once — repeated connects stack gain causing volume doubling
+        if (!node._scDestConnected) { node.connect(sharedAudioCtx.destination); node._scDestConnected = true; }
+        this._stream.getAudioTracks().forEach(t => { this._stream.removeTrack(t); t.stop(); });
+        dst.stream.getAudioTracks().forEach(t => this._stream.addTrack(t));
+        console.log('[SOON CLIP] Audio connected');
       } catch(e) {
         console.warn('[SOON CLIP] Audio connect failed:', e.message);
       }
     }
-    connectAudio(vid);
 
-    let streamGoneFrames = 0;
-    const STREAM_GONE_THRESHOLD = 17;
-    // Track src not element — Fishtank reuses the same video element, just changes src
-    let watcherLastSrc = vid.currentSrc || vid.src;
+    _teardownAudio() {
+      if (this._audioNode && this._audioDst) {
+        try { this._audioNode.disconnect(this._audioDst); } catch {}
+      }
+      this._audioNode = this._audioDst = null;
+    }
 
-    const camWatcher = setInterval(() => {
-      if (!recording) { clearInterval(camWatcher); return; }
-      const currentVid = getVideoEl();
-      if (!currentVid || currentVid.readyState === 0 || (currentVid.paused && currentVid.readyState < 2)) {
-        streamGoneFrames++;
-        if (streamGoneFrames >= STREAM_GONE_THRESHOLD) {
-          console.log('[SOON CLIP] Stream closed — stopping');
-          clearInterval(camWatcher); stopRecording();
+    _drawStatic(w, h) {
+      // Reuse ImageData — avoids allocating 14KB per frame at 24fps
+      if (!this._staticImgData) this._staticImgData = this._staticCtx.createImageData(80, 45);
+      const imgData = this._staticImgData;
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const v = Math.random() * 180 | 0;
+        d[i] = d[i+1] = d[i+2] = v; d[i+3] = 255;
+      }
+      this._staticCtx.putImageData(imgData, 0, 0);
+      this._ctx.imageSmoothingEnabled = false;
+      this._ctx.drawImage(this._staticCanvas, 0, 0, w, h);
+      this._ctx.imageSmoothingEnabled = true;
+      const { logoImg, logoReady } = _assets;
+      if (logoReady && logoImg.naturalWidth > 0) {
+        const lw = Math.min(w * 0.85, 600), lh = lw * (logoImg.naturalHeight / logoImg.naturalWidth);
+        this._ctx.globalAlpha = 0.9;
+        this._ctx.drawImage(logoImg, (w - lw) / 2, (h - lh) / 2, lw, lh);
+        this._ctx.globalAlpha = 1;
+      } else {
+        this._ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        this._ctx.fillRect(w/2-90, h/2-20, 180, 40);
+        this._ctx.fillStyle = 'white'; this._ctx.font = 'bold 15px sans-serif';
+        this._ctx.textAlign = 'center'; this._ctx.textBaseline = 'middle';
+        this._ctx.fillText('switching cam...', w/2, h/2);
+      }
+    }
+
+    _drawFrame(ts) {
+      if (!this.isActive) return; // session ended — rAF loop stops here
+      if (ts - this._lastDrawTs < 41.67) { // ~24fps
+        this._rafId = requestAnimationFrame(ts => this._drawFrame(ts));
+        return;
+      }
+      this._lastDrawTs = ts;
+
+      // Prefer cached vid — only call getVideoEl() when it's stale
+      const cv = (this._lastVid?.readyState >= 2 && !this._lastVid.paused) ? this._lastVid : getVideoEl();
+      if (!cv || cv.readyState < 2) {
+        // Multi-cam: draw static to fill stream load gap
+        // Split-clip: hold last frame (canvas retains it) — no static in the clip
+        if (this.multiCam) this._drawStatic(this._canvas.width, this._canvas.height);
+        this._rafId = requestAnimationFrame(ts => this._drawFrame(ts));
+        return;
+      }
+      if (cv !== this._lastVid) {
+        this._lastVid = cv;
+        if (this.multiCam) {
+          // Multi-cam: show static frames during cam transition
+          this._staticFrames = 20;
+        }
+        // Split-clip: cam change handled by _watchCam stopping the recording
+      }
+      if (this._staticFrames > 0) {
+        this._drawStatic(this._canvas.width, this._canvas.height);
+        this._staticFrames--;
+        this._rafId = requestAnimationFrame(ts => this._drawFrame(ts));
+        return;
+      }
+      const cr = this.cropRegion;
+      const vw = cv.videoWidth || 1920, vh = cv.videoHeight || 1080;
+      if (cr) {
+        const cw = Math.round(cr.w * vw), ch = Math.round(cr.h * vh);
+        if (this._canvas.width !== cw || this._canvas.height !== ch) { this._canvas.width = cw; this._canvas.height = ch; }
+        this._ctx.drawImage(cv, cr.x*vw, cr.y*vh, cr.w*vw, cr.h*vh, 0, 0, cw, ch);
+      } else {
+        if (this._canvas.width !== vw || this._canvas.height !== vh) { this._canvas.width = vw; this._canvas.height = vh; }
+        this._ctx.drawImage(cv, 0, 0, vw, vh);
+      }
+      this._rafId = requestAnimationFrame(ts => this._drawFrame(ts));
+    }
+
+    _watchCam() {
+      if (!this.isActive) return;
+      const cv = (this._lastVid?.readyState >= 2 && !this._lastVid.paused) ? this._lastVid : getVideoEl();
+      if (!cv || cv.readyState === 0 || (cv.paused && cv.readyState < 2)) {
+        if (++this._goneCount >= 10) { // ~5s at 500ms interval
+          console.log('[SOON CLIP] Stream gone — stopping');
+          stopRecording(); // use wrapper so recording flag + activeSession stay in sync
         }
         return;
       }
-      streamGoneFrames = 0;
-
-      const currentSrc = currentVid.currentSrc || currentVid.src;
-      if (currentSrc && currentSrc !== watcherLastSrc) {
-        watcherLastSrc = currentSrc;
-        console.log('[SOON CLIP] Cam src changed — splitting clip');
-        const was = recording;
-        stopRecording();
-        if (was) setTimeout(() => { if (!recording) startRecording(); }, 800);
+      this._goneCount = 0;
+      const src = cv.currentSrc || cv.src;
+      if (src && src !== this._lastSrc) {
+        this._lastSrc = src;
+        if (this._splitDebounce) return;
+        this._splitDebounce = true;
+        setTimeout(() => { this._splitDebounce = false; }, 2000);
+        if (this.multiCam) {
+          // Multi-cam: start static immediately at the switch point
+          console.log('[SOON CLIP] Cam switch — continuing (multi-cam mode)');
+          this._staticFrames = 20; // prime static so _drawFrame shows it immediately
+        } else {
+          // Split-clip: stop current and start fresh after it fully finalises
+          console.log('[SOON CLIP] Cam split — new clip');
+          stopRecording();
+          // Wait for onstop to complete before starting new session —
+          // prevents double audio connect from overlapping teardown/setup
+          setTimeout(() => { if (!activeSession?.isActive) startRecording(); }, 1000);
+        }
       }
-    }, 300);
+    }
+  }
 
-    if (cropRegion) showRecordingCropOverlay(vid,cropRegion);
+  // ── Session management ─────────────────────────────────────────────────────
+  let activeSession = null;
 
-    const mimeType=getSupportedMimeType();
-    recChunks=[];
-    recorder=new MediaRecorder(canvasStream,{mimeType,videoBitsPerSecond:8_000_000,audioBitsPerSecond:128_000});
-    recorder.ondataavailable=e=>{if(e.data.size>0)recChunks.push(e.data);};
-    recorder.onstop=()=>{
-      clearInterval(camWatcher);
-      const v=getVideoEl(); if(v)v.style.outline='';
-      if (recording) {
-        clearInterval(recTimer); clearTimeout(recorder._autoStop);
-        recording=false;
-        if(UI.recIndicator)UI.recIndicator.style.display='none';
-        updateRecordBtn(false,false);
-        document.getElementById('sc-rec-crop-overlay')?.remove();
-      }
-      finaliseClip(mimeType);
-    };
-
-    recorder.start(500);
-    recording=true; recSeconds=0; recStartTime=Date.now();
-
-    const borderTimer=setInterval(()=>{
-      const v=getVideoEl();
-      if(!v||!recording){clearInterval(borderTimer);return;}
-      v.style.outline=recSeconds%2===0?'3px solid #df4e1e':'3px solid #ff7043';
-      v.style.outlineOffset='-3px';
-    },1000);
-    recorder._borderTimer=borderTimer;
-    recorder._autoStop=setTimeout(()=>stopRecording(),MAX_RECORD_SEC*1000);
-
-    recTimer=setInterval(()=>{
-      recSeconds++;
-      showStatus('⏺ '+formatDuration(recSeconds),'rec');
-      if(UI.recIndicator){UI.recIndicator.textContent='⏺ '+formatDuration(recSeconds);UI.recIndicator.style.display='';}
-      updateRecordBtn(false,true);
-    },1000);
-
-    updateRecordBtn(false,true);
-    showStatus('Recording — press ⏹ to stop','rec');
+  async function startRecording() {
+    if (activeSession?.isActive) return;
+    const session = new RecordingSession(cropRegion);
+    session.multiCam = localStorage.getItem('sc_multicam') === '1';
+    try {
+      await session.start();
+      activeSession = session;
+      recording = true; // keep module-level flag in sync for UI guards
+    } catch(e) {
+      showStatus(e.message || 'Could not start recording', 'err');
+      session.destroy();
+    }
   }
 
   function stopRecording() {
-    if (!recorder||!recording) return;
-    clearInterval(recTimer); clearTimeout(recorder._autoStop);
-    recording=false;
-    if(recorder.state==='recording'||recorder.state==='paused')recorder.stop();
-    if(recorder._borderTimer)clearInterval(recorder._borderTimer);
-    const vid=getVideoEl(); if(vid)vid.style.outline='';
-    document.getElementById('sc-rec-crop-overlay')?.remove();
-    if(UI.recIndicator)UI.recIndicator.style.display='none';
-    updateRecordBtn(false,false);
-    showStatus('Processing…','loading');
+    if (!activeSession?.isActive) return;
+    recording = false;
+    activeSession.stop();
+    activeSession = null;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -411,7 +524,8 @@
     return new Promise(resolve=>{
       new Blob(chunks).arrayBuffer().then(buf=>{
         const data=new Uint8Array(buf), view=new DataView(buf);
-        for(let i=0;i<data.length-12;i++){
+        const scanLimit = Math.min(data.length - 12, 2048); // Duration is always in first ~200 bytes
+        for(let i=0;i<scanLimit;i++){
           if(data[i]===0x44&&data[i+1]===0x89){
             const st=data[i+2];
             if(st===0x88){view.setFloat64(i+3,durationSec*1000,false);resolve(buf);return;}
@@ -427,32 +541,43 @@
   // ── FINALISE CLIP ──────────────────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════════
 
-  function finaliseClip(mimeType) {
-    const totalSize=recChunks.reduce((s,c)=>s+c.size,0);
-    const durationSec=recStartTime?Math.max(1,Math.round((Date.now()-recStartTime)/1000)):Math.max(1,recSeconds);
-    if(totalSize<1000||recChunks.length===0){showStatus('No data recorded — try again','err');return;}
+  function finaliseClip(mimeType, chunksSnapshot, durationSec) {
+    const totalSize=chunksSnapshot.reduce((s,c)=>s+c.size,0);
+    if(totalSize<1000||chunksSnapshot.length===0){showStatus('No data recorded — try again','err');return;}
 
-    const isWebm=mimeType.includes('webm')||!mimeType.includes('mp4');
-    const ext=isWebm?'webm':'mp4';
     const clipId=Date.now();
     const clip={id:clipId,blob:null,blobUrl:null,thumbUrl:null,duration:durationSec,trimIn:0,trimOut:durationSec,
       label:(window.SOON.activeRoom?.label||'Clip')+' — '+formatDuration(durationSec),
-      filename:'soontools_'+clipId+'.'+ext,mimeType,processing:true};
+      filename:'soontools_'+clipId+'.webm',mimeType,processing:true};
 
     clips.unshift(clip);
-    UI.clipsList?.querySelectorAll('.sc-card-body').forEach(b=>{
+    // Cap at 10 clips — revoke oldest blob URLs to free memory
+    while(clips.length>10){
+      const old=clips.pop();
+      if(old.blobUrl){URL.revokeObjectURL(old.blobUrl);old.blobUrl=null;}
+      if(old.thumbUrl){URL.revokeObjectURL(old.thumbUrl);old.thumbUrl=null;}
+      document.querySelector(`[data-clip-id="${old.id}"]`)?.remove();
+    }
+    // Collapse all existing FULLY-BUILT cards (not processing placeholders) when a new clip arrives
+    UI.clipsList?.querySelectorAll('.sc-clip-card:not([data-processing]) .sc-card-body').forEach(b=>{
       if(b.style.display!=='none'){b.style.display='none';const t=b.previousElementSibling?.querySelector('.sc-card-toggle');if(t)t.textContent='+';}
     });
     renderQueue();
     showStatus('Clip captured — processing…','loading');
 
     let ps=0;
-    const pt=setInterval(()=>{ps++;const el=document.querySelector(`[data-clip-id="${clipId}"] .sc-ph-status`);if(el)el.textContent='Processing… '+ps+'s';},1000);
+    const pt=setInterval(()=>{
+      ps++;
+      const card=document.querySelector(`[data-clip-id="${clipId}"]`);
+      if(!card){clearInterval(pt);return;} // card removed — stop timer
+      const el=card.querySelector('.sc-ph-status');
+      if(el) el.textContent='Processing… '+ps+'s';
+    },1000);
 
-    fixWebmDuration(recChunks,durationSec).then(fixedBuf=>{
+    fixWebmDuration(chunksSnapshot,durationSec).then(fixedBuf=>{
       clearInterval(pt);
       const blob=new Blob([fixedBuf],{type:mimeType});
-      clip.blob=blob; clip.blobUrl=URL.createObjectURL(blob); clip.processing=false; cropRegion=null;
+      clip.blob=blob; clip.blobUrl=URL.createObjectURL(blob); clip.processing=false;
       const existing=document.querySelector(`[data-clip-id="${clipId}"]`);
       const fullCard=buildClipCard(clip,true);
       if(existing)existing.replaceWith(fullCard);
@@ -472,10 +597,21 @@
   function generateThumbnailAsync(blob,cb) {
     const url=URL.createObjectURL(blob);
     const v=document.createElement('video');
+    // Use preload='auto' and visible size so browser actually loads it
+    // 1x1px elements with preload='metadata' get silently deferred by Chrome
     v.src=url; v.muted=true; v.preload='metadata';
-    v.style.cssText='position:fixed;left:-9999px;width:1px;height:1px;';
+    v.style.cssText='position:fixed;left:-9999px;width:120px;height:68px;opacity:0;pointer-events:none;';
     document.body.appendChild(v);
-    v.addEventListener('loadeddata',()=>{v.currentTime=0.5;});
+
+    let cleaned=false;
+    const cleanup=()=>{
+      if(cleaned)return; cleaned=true;
+      clearTimeout(timeout); v.remove(); URL.revokeObjectURL(url);
+    };
+    const timeout=setTimeout(cleanup,5000);
+
+    // preload=metadata: loadedmetadata fires, then seek to 0.5s triggers seeked
+    v.addEventListener('loadedmetadata',()=>{v.currentTime=0.5;});
     v.addEventListener('seeked',()=>{
       try{
         const c=document.createElement('canvas'); c.width=120; c.height=68;
@@ -486,9 +622,9 @@
         if(avg<5&&v.currentTime<v.duration-0.5){v.currentTime=Math.min(v.duration*0.3,v.currentTime+0.5);return;}
         cb(c.toDataURL('image/jpeg',0.7));
       }catch(e){}
-      v.remove(); URL.revokeObjectURL(url);
+      cleanup();
     });
-    v.addEventListener('error',()=>{v.remove();URL.revokeObjectURL(url);});
+    v.addEventListener('error',cleanup);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -502,8 +638,11 @@
     canvas.style.cssText='position:fixed;z-index:2147483646;pointer-events:none;';
     document.documentElement.appendChild(canvas);
     const ctx=canvas.getContext('2d'); let dashOffset=0;
-    function draw() {
+    let lastCropDraw=0;
+    function draw(ts) {
       if(!recording){canvas.remove();return;}
+      if(ts-lastCropDraw<33){requestAnimationFrame(draw);return;} // ~30fps
+      lastCropDraw=ts;
       const el=vid.getBoundingClientRect();
       const vw=vid.videoWidth||1920, vh=vid.videoHeight||1080;
       const scale=Math.min(el.width/vw,el.height/vh);
@@ -524,43 +663,70 @@
     requestAnimationFrame(draw);
   }
 
-  function getSupportedMimeType() {
-    return ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4']
-      .find(t=>MediaRecorder.isTypeSupported(t))||'';
-  }
+  // Cached once at startup — no need to re-probe on every recording
+  // VP8 preferred over VP9: more predictable keyframe intervals for MediaRecorder chunks,
+  // resulting in more reliable blob playback in the preview player.
+  const SUPPORTED_MIME = ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm','video/mp4']
+    .find(t=>MediaRecorder.isTypeSupported(t))||'';
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ── FFMPEG ─────────────────────────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════════
 
-  let ffmpegInstance=null, ffmpegLoading=false, ffmpegReady=false;
-  let ffmpegBusy=false; // Mutex: only one command at a time
+  // Serial queue — each downloadClip call chains onto this, guaranteeing
+  // ffmpeg.wasm never receives concurrent run() calls
+  let ffmpegQueue = Promise.resolve();
 
-  function loadScript(src) {
-    return new Promise((resolve,reject)=>{
-      if(document.querySelector(`script[src="${src}"]`)){resolve();return;}
-      const s=document.createElement('script');
-      s.src=src; s.onload=resolve; s.onerror=reject;
-      document.head.appendChild(s);
-    });
-  }
+  // Cached FFmpeg instance — loaded once, reused across downloads.
+  // A run-level mutex (ffmpegRunning) prevents concurrent run() calls
+  // without the overhead of recreating the wasm instance each time.
+  let ffmpegCached = null;
+  let ffmpegLoadPromise = null;
+  let ffmpegRunning = false;
 
-  async function getFFmpeg() {
-    if(ffmpegReady)return ffmpegInstance;
-    if(ffmpegLoading){await new Promise(res=>{const c=setInterval(()=>{if(ffmpegReady||!ffmpegLoading){clearInterval(c);res();}},100);});return ffmpegInstance;}
-    ffmpegLoading=true; showStatus('Loading FFmpeg…','loading');
-    try{
+  async function getOrLoadFFmpeg() {
+    if(ffmpegCached) return ffmpegCached; // caller's wait loop handles ffmpegRunning
+    if(ffmpegLoadPromise) return ffmpegLoadPromise;
+    ffmpegLoadPromise = (async () => {
       await loadScript('https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js');
       const win=(typeof unsafeWindow!=='undefined')?unsafeWindow:window;
       const FFmpegLib=win.FFmpeg;
-      if(!FFmpegLib?.createFFmpeg)throw new Error('FFmpeg global not found');
-      ffmpegInstance=FFmpegLib.createFFmpeg({mainName:'main',log:false,corePath:'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js'});
-      await ffmpegInstance.load();
-      ffmpegReady=true; ffmpegLoading=false; showStatus('FFmpeg ready','ok'); return ffmpegInstance;
-    }catch(e){
-      console.error('[SOON CLIP] FFmpeg load error:',e);
-      showStatus('FFmpeg failed','err'); ffmpegLoading=false; return null;
+      if(!FFmpegLib?.createFFmpeg) throw new Error('FFmpeg global not found');
+      const ff=FFmpegLib.createFFmpeg({
+        mainName:'main', log:false,
+        corePath:'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js'
+      });
+      await ff.load();
+      ffmpegCached=ff;
+      return ff;
+    })();
+    try {
+      const ff = await ffmpegLoadPromise;
+      ffmpegLoadPromise = null;
+      return ff;
+    } catch(e) {
+      ffmpegLoadPromise = null;
+      ffmpegCached = null;
+      throw e;
     }
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve,reject)=>{
+      const existing=document.querySelector(`script[src="${src}"]`);
+      if(existing){
+        // Script tag exists but may still be loading — wait for it
+        if(existing.dataset.loaded==='1'){resolve();return;}
+        existing.addEventListener('load',()=>{existing.dataset.loaded='1';resolve();},{once:true});
+        existing.addEventListener('error',reject,{once:true});
+        return;
+      }
+      const s=document.createElement('script');
+      s.src=src;
+      s.onload=()=>{s.dataset.loaded='1';resolve();};
+      s.onerror=reject;
+      document.head.appendChild(s);
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -568,61 +734,80 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   async function downloadClip(clip) {
+    // Append to the serial queue. The key detail:
+    // - _runDownload swallows its own errors internally (try/catch inside it)
+    //   so it NEVER rejects — the queue chain stays alive automatically.
+    // - We must NOT .catch() on ffmpegQueue itself here, because that would
+    //   replace ffmpegQueue with an already-resolved promise, causing the next
+    //   call to skip the queue and run immediately (the bug we had before).
+    ffmpegQueue = ffmpegQueue.then(() => _runDownload(clip));
+    return ffmpegQueue;
+  }
+
+  async function _runDownload(clip) {
     const needsTrim=clip.trimIn>0.1||clip.trimOut<clip.duration-0.1;
-    updateClipStatus(clip.id,'Converting to MP4…');
-    let elapsed=0;
-    const pt=setInterval(()=>{elapsed++;updateClipStatus(clip.id,'Converting… '+elapsed+'s');},1000);
-
-    // Wait for FFmpeg to be free (mutex lock)
-    while(ffmpegBusy) {
-      await new Promise(res=>setTimeout(res,100));
+    // Animated progress bar — fills over estimated duration, no extra CPU
+    const estimatedMs = Math.min(30000, Math.max(5000, clip.duration * 800));
+    const statusEl = document.getElementById('sc-cst-'+clip.id);
+    if(statusEl){
+      statusEl.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><span style="font-size:9px;opacity:0.6;">Converting…</span><div style="flex:1;height:3px;background:rgba(0,0,0,0.12);border-radius:2px;overflow:hidden;"><div id="sc-prog-'+clip.id+'" style="height:100%;width:0%;background:var(--base-primary,#df4e1e);border-radius:2px;transition:width '+estimatedMs+'ms linear;"></div></div></div>';
+      statusEl.style.display='';
+      requestAnimationFrame(()=>{ const bar=document.getElementById('sc-prog-'+clip.id); if(bar) bar.style.width='90%'; });
     }
-    ffmpegBusy=true;
-
     try{
-      const ff=await getFFmpeg(); if(!ff)throw new Error('FFmpeg unavailable');
+      if(!clip.blobUrl) throw new Error('Clip was deleted before conversion could start');
+      const ff = await getOrLoadFFmpeg();
       const win=(typeof unsafeWindow!=='undefined')?unsafeWindow:window;
-      const{fetchFile}=win.FFmpeg; if(!fetchFile)throw new Error('fetchFile not found');
+      const FFmpegLib=win.FFmpeg;
+      const{fetchFile}=FFmpegLib;
+      if(!fetchFile) throw new Error('fetchFile not found');
+      // Wait for any concurrent run to finish — queue serialises calls but
+      // ffmpegRunning guards against the wasm internal state not resetting
+      let waited=0;
+      while(ffmpegRunning && waited<15000){
+        await new Promise(res=>setTimeout(res,100)); waited+=100;
+      }
+      if(ffmpegRunning) throw new Error('FFmpeg still busy after 15s — try again');
+      ffmpegRunning=true;
       const inputData=await fetchFile(clip.blobUrl);
       ff.FS('writeFile','input.webm',inputData);
-      const args=['-i','input.webm'];
-      if(needsTrim)args.push('-ss',clip.trimIn.toFixed(3),'-to',clip.trimOut.toFixed(3));
-      args.push('-c','copy','-movflags','+faststart','-y','output.mp4');
-      await ff.run(...args);
-      let outputData; try{outputData=ff.FS('readFile','output.mp4');}catch(e){throw new Error('output.mp4 not found');}
-      if(!outputData||outputData.length<1000)throw new Error('Output too small');
-      clearInterval(pt);
+
+      async function runFFmpeg(args) {
+        try { await ff.run(...args); } catch(e) {
+          if(!e.message?.includes('exit(0)')) throw e;
+        }
+      }
+
+      const trimArgs = needsTrim ? ['-ss',clip.trimIn.toFixed(3),'-to',clip.trimOut.toFixed(3)] : [];
+      // Copy video stream (no decode/encode — fast), re-encode audio Opus→AAC
+      // Opus audio cannot be stream-copied into MP4 container — AAC is required.
+      // Audio-only re-encode is negligible CPU cost vs full video re-encode.
+      await runFFmpeg([
+        '-i','input.webm',...trimArgs,
+        '-c:v','copy',
+        '-c:a','aac','-b:a','128k',
+        '-movflags','+faststart','-y','output.mp4'
+      ]);
+
+      let outputData;
+      try{ outputData=ff.FS('readFile','output.mp4'); }catch(e){ outputData=null; }
+      if(!outputData||outputData.length<1000) throw new Error('MP4 conversion failed — try again');
       triggerDownload(new Blob([outputData.buffer],{type:'video/mp4'}),clip.filename.replace(/\.\w+$/,'.mp4'));
       updateClipStatus(clip.id,'✓ Saved as MP4');
+      // Clean up wasm FS
       try{ff.FS('unlink','input.webm');}catch{}
       try{ff.FS('unlink','output.mp4');}catch{}
     }catch(err){
-      clearInterval(pt);
       console.warn('[SOON CLIP] FFmpeg failed:',err.message);
-      updateClipStatus(clip.id,'MP4 failed — saving WebM');
-      if(!needsTrim)triggerDownload(clip.blob,clip.filename);
-      else trimAndDownloadWebm(clip);
+      // Discard cached instance — any failure may leave FFmpeg in a bad state
+      ffmpegCached=null;
+      updateClipStatus(clip.id,'⚠ MP4 failed — click Save MP4 to retry', true);
     }finally{
-      ffmpegBusy=false;
+      ffmpegRunning=false;
+      // Snap progress bar to 100% or reset on completion
+      const bar=document.getElementById('sc-prog-'+clip.id);
+      if(bar){bar.style.transition='width 0.2s ease';bar.style.width='100%';}
     }
-  }
-
-  function trimAndDownloadWebm(clip) {
-    const vid=document.createElement('video');
-    vid.src=clip.blobUrl; vid.muted=true;
-    vid.style.cssText='position:fixed;left:-9999px;width:1px;height:1px;';
-    document.body.appendChild(vid);
-    const mimeType=getSupportedMimeType(), chunks=[];
-    vid.addEventListener('loadedmetadata',()=>{vid.currentTime=clip.trimIn;});
-    vid.addEventListener('seeked',()=>{
-      const stream=vid.captureStream?vid.captureStream():vid.mozCaptureStream();
-      const rec=new MediaRecorder(stream,{mimeType});
-      rec.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
-      rec.onstop=()=>{triggerDownload(new Blob(chunks,{type:mimeType}),clip.filename);updateClipStatus(clip.id,'✓ Saved (WebM)');vid.remove();};
-      rec.start(); vid.play().catch(()=>{});
-      const check=setInterval(()=>{if(vid.currentTime>=clip.trimOut){clearInterval(check);rec.stop();vid.pause();}},100);
-      setTimeout(()=>{if(rec.state==='recording'){clearInterval(check);rec.stop();vid.pause();}},( clip.trimOut-clip.trimIn+3)*1000);
-    });
   }
 
   function triggerDownload(blob,filename) {
@@ -678,9 +863,21 @@
     title.style.cssText='font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.5;margin-bottom:8px;';
     title.textContent='Settings'; panel.appendChild(title);
 
+    // Multi-cam toggle
+    const mcRow=document.createElement('div'); mcRow.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;';
+    const mcLbl=document.createElement('div');
+    mcLbl.innerHTML='<span style="font-size:10px;color:rgba(0,0,0,0.65);">Multi-cam mode</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">Record continuously across cam switches</div>';
+    const mcBtn=document.createElement('button'); mcBtn.className='sc-toggle-btn';
+    const mcOn=()=>localStorage.getItem('sc_multicam')==='1';
+    const mcUpdate=()=>{mcBtn.textContent=mcOn()?'ON':'OFF';mcBtn.classList.toggle('sc-toggle-btn--on',mcOn());};
+    mcUpdate();
+    mcBtn.addEventListener('click',e=>{e.stopPropagation();localStorage.setItem('sc_multicam',mcOn()?'0':'1');mcUpdate();});
+    mcRow.appendChild(mcLbl); mcRow.appendChild(mcBtn); panel.appendChild(mcRow);
+
     const sep=document.createElement('div'); sep.style.cssText='border-top:1px solid rgba(0,0,0,0.1);margin:8px 0 6px;'; panel.appendChild(sep);
     const kbTitle=document.createElement('div'); kbTitle.style.cssText='font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.4;margin-bottom:6px;'; kbTitle.textContent='Keyboard Shortcuts'; panel.appendChild(kbTitle);
 
+    const shortcutAbort = new AbortController();
     function makeShortcutRow(label,key){
       const row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px;';
       const lbl=document.createElement('span'); lbl.style.cssText='font-size:10px;color:rgba(0,0,0,0.65);flex:1;'; lbl.textContent=label;
@@ -697,11 +894,12 @@
         parts.push(e.key.length===1?e.key.toUpperCase():e.key);
         const combo=parts.join('+'); localStorage.setItem(key,combo);
         btn.textContent=combo||'None'; btn.classList.remove('sc-toggle-btn--on'); capturing=false;
-      },{capture:true});
+      },{capture:true, signal:shortcutAbort.signal}); // aborted when panel is removed
       row.appendChild(lbl); row.appendChild(btn); panel.appendChild(row);
     }
     makeShortcutRow('Record','sc_key_record');
     makeShortcutRow('Screenshot','sc_key_screenshot');
+    panel._abort = shortcutAbort; // exposed so caller can abort on panel removal
     return panel;
   }
 
@@ -718,8 +916,11 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   function buildUI() {
+    let reinjecting = false;
+
     function inject() {
       if(document.getElementById('sc-root'))return;
+      if(reinjecting)return;
       const root=document.createElement('div'); root.id='sc-root';
 
       const hdr=document.createElement('div'); hdr.className='sc-hdr';
@@ -740,8 +941,10 @@
           <button id="sc-toggle" class="sc-btn">−</button>
         </div>`;
 
+      const stalePanel = document.getElementById('sc-settings');
+      if(stalePanel){ stalePanel._abort?.abort(); stalePanel.remove(); } // clean up listeners + DOM
       const settingsPanel=buildSettingsPanel();
-      hdr.style.position='relative'; hdr.appendChild(settingsPanel);
+      document.body.appendChild(settingsPanel);
 
       const body=document.createElement('div'); body.id='sc-body';
       const inner=document.createElement('div'); inner.className='sc-inner';
@@ -751,17 +954,32 @@
       function initPosition(cb){
         const ftfpMap=document.getElementById('ftfp-map');
         const chatInput=document.getElementById('chat-input');
-        if(ftfpMap){ftfpMap.insertAdjacentElement('afterend',root);cb();return;}
+        if(ftfpMap){ftfpMap.insertAdjacentElement('afterend',root);cb();startRejectionWatcher();return;}
         if(chatInput){
           const insertBefore=chatInput.parentElement?.parentElement?.parentElement;
           if(insertBefore?.parentElement){
             insertBefore.insertAdjacentElement('beforebegin',root);
-            const obs=new MutationObserver(()=>{if(!document.contains(root)){obs.disconnect();setTimeout(()=>initPosition(cb),100);}});
-            obs.observe(document.body,{childList:true,subtree:true});
-            cb(); return;
+            cb(); startRejectionWatcher(); return;
           }
         }
         setTimeout(()=>initPosition(cb),300);
+      }
+
+      // Watch for React wiping our root out of the DOM and re-inject cleanly
+      function startRejectionWatcher() {
+        const obs=new MutationObserver(()=>{
+          if(!document.contains(root)){
+            obs.disconnect();
+            if(reinjecting)return;
+            reinjecting=true;
+            // Debounce — wait for React to finish hydrating before re-injecting
+            setTimeout(()=>{ reinjecting=false; inject(); }, 1000);
+          }
+        });
+        // Watch only direct children of body — avoids firing on every React
+        // sub-tree mutation. Our root is always a direct child of its container.
+        const watchTarget = root.parentElement || document.body;
+        obs.observe(watchTarget,{childList:true});
       }
 
       initPosition(()=>{
@@ -772,9 +990,22 @@
         UI.recFull=document.getElementById('sc-rec-full');
         UI.recCrop=document.getElementById('sc-rec-crop');
 
-        let settingsOpen=false;
-        document.getElementById('sc-settings-btn').addEventListener('click',e=>{e.stopPropagation();settingsOpen=!settingsOpen;settingsPanel.style.display=settingsOpen?'':'none';});
-        document.addEventListener('click',()=>{if(settingsOpen){settingsOpen=false;settingsPanel.style.display='none';}});
+        // Per-instance listeners on fresh elements — safe to re-register each injection
+        const settingsBtn=document.getElementById('sc-settings-btn');
+        settingsBtn.dataset.open='0';
+        settingsBtn.addEventListener('click',e=>{
+          e.stopPropagation();
+          const open=settingsBtn.dataset.open==='1';
+          settingsBtn.dataset.open=open?'0':'1';
+          if(!open){
+            const r=e.currentTarget.getBoundingClientRect();
+            settingsPanel.style.top=(r.bottom+4)+'px';
+            settingsPanel.style.right=(window.innerWidth-r.right)+'px';
+            settingsPanel.style.display='';
+          } else {
+            settingsPanel.style.display='none';
+          }
+        });
 
         let collapsed=false;
         document.getElementById('sc-toggle').addEventListener('click',()=>{collapsed=!collapsed;body.style.display=collapsed?'none':'';document.getElementById('sc-toggle').textContent=collapsed?'+':'−';});
@@ -793,20 +1024,39 @@
           else{pendingAction='record';enterFrameMode();}
         });
 
-        document.addEventListener('keydown',e=>{
-          if(['INPUT','TEXTAREA'].includes(document.activeElement?.tagName))return;
-          if(e.key==='Escape'&&frameMode){cancelFrameMode();return;}
-          const recKey=getShortcut('sc_key_record'), ssKey=getShortcut('sc_key_screenshot');
-          if(recKey&&matchesShortcut(e,recKey)){e.preventDefault();if(recording)stopRecording();else{cropRegion=null;startRecording();}return;}
-          if(ssKey&&matchesShortcut(e,ssKey)){e.preventDefault();takeScreenshot(null);}
-        },{capture:true});
-
         showStatus('Click ⏺ to record • 📷 to screenshot','');
-        console.log('[SOON CLIP] UI injected v4.3.1');
+        console.log('[SOON CLIP] UI injected v5.1.0');
       });
     }
-    if(document.body)inject();
-    else document.addEventListener('DOMContentLoaded',inject,{once:true});
+
+    // Global document listeners — registered ONCE, outside inject(),
+    // so they don't stack up on every React-triggered re-injection
+    document.addEventListener('click',()=>{
+      const panel=document.getElementById('sc-settings');
+      if(panel && panel.style.display !== 'none') {
+        panel.style.display='none';
+        // Reset the settingsOpen flag on whatever inject() instance owns it —
+        // find it via the button and simulate a consistent closed state.
+        // We can't reach the closure var directly, so we store state on the button.
+        const btn=document.getElementById('sc-settings-btn');
+        if(btn) btn.dataset.open='0';
+      }
+    });
+    document.addEventListener('keydown',e=>{
+      if(['INPUT','TEXTAREA'].includes(document.activeElement?.tagName))return;
+      if(e.key==='Escape'&&frameMode){cancelFrameMode();return;}
+      const recKey=getShortcut('sc_key_record'), ssKey=getShortcut('sc_key_screenshot');
+      if(recKey&&matchesShortcut(e,recKey)){e.preventDefault();if(recording)stopRecording();else{cropRegion=null;startRecording();}return;}
+      if(ssKey&&matchesShortcut(e,ssKey)){e.preventDefault();takeScreenshot(null);}
+    },{capture:true});
+
+    // Wait for full page load (React hydration completes after window load on Next.js)
+    // then add a small buffer to ensure hydration is done before injecting
+    function safeInject() {
+      if(document.readyState==='complete') setTimeout(inject, 300);
+      else window.addEventListener('load', ()=>setTimeout(inject,300), {once:true});
+    }
+    safeInject();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -864,6 +1114,7 @@
 
   function buildClipCard(clip,expanded){
     const card=document.createElement('div'); card.className='sc-clip-card'; card.dataset.clipId=clip.id;
+    if(clip.processing) card.dataset.processing='1';
 
     const hdr=document.createElement('div'); hdr.className='sc-card-hdr';
     hdr.innerHTML=`
@@ -879,11 +1130,18 @@
 
     if(clip.processing){
       body.innerHTML=`<div style="display:flex;align-items:center;gap:8px;padding:10px 0;"><div class="sc-ph-spinner"></div><span class="sc-ph-status" style="font-size:10px;opacity:0.5;">Processing… 0s</span></div>`;
-      card.appendChild(hdr); card.appendChild(body); return card;
+      card.appendChild(hdr); card.appendChild(body);
+      // Wire toggle even on processing cards so they're always collapsible
+      hdr.querySelector('.sc-card-toggle').addEventListener('click',()=>{
+        const open=body.style.display!=='none';
+        body.style.display=open?'none':'';
+        hdr.querySelector('.sc-card-toggle').textContent=open?'+':'−';
+      });
+      return card;
     }
 
     body.innerHTML=`
-      <video class="sc-clip-video" src="${clip.blobUrl}" preload="metadata" muted playsinline></video>
+      <video class="sc-clip-video" src="${clip.blobUrl}" preload="metadata" muted playsinline style="visibility:hidden;height:0;margin:0;"></video>
       <div class="sc-player-row">
         <button class="sc-play-btn">▶</button>
         <button class="sc-mute-btn" title="Toggle mute">🔇</button>
@@ -918,13 +1176,55 @@
 
     card.appendChild(hdr); card.appendChild(body);
 
-    hdr.querySelector('.sc-card-toggle').addEventListener('click',()=>{const open=body.style.display!=='none';body.style.display=open?'none':'';hdr.querySelector('.sc-card-toggle').textContent=open?'+':'−';});
-    hdr.querySelector('.sc-dl-btn-sm').addEventListener('click',()=>{const ti=clip.trimIn,to=clip.trimOut;clip.trimIn=0;clip.trimOut=clip.duration;downloadClip(clip);clip.trimIn=ti;clip.trimOut=to;});
-    hdr.querySelector('.sc-del-btn').addEventListener('click',()=>{URL.revokeObjectURL(clip.blobUrl);if(clip.thumbUrl)URL.revokeObjectURL(clip.thumbUrl);clips.splice(clips.findIndex(c=>c.id===clip.id),1);card.remove();});
+    // Declare dragAbort here so it's in scope for the del button listener below
+    const dragAbort = new AbortController();
+
+    hdr.querySelector('.sc-card-toggle').addEventListener('click',()=>{
+      const open=body.style.display!=='none';
+      body.style.display=open?'none':'';
+      hdr.querySelector('.sc-card-toggle').textContent=open?'+':'−';
+      // When expanding, kick the video to load if metadata hasn't arrived yet
+      // (browsers skip metadata loading for hidden elements)
+      if(!open){
+        // Switch to full preload when expanded so playback is smooth
+        if(video.preload!=='auto') video.preload='auto';
+        // If metadata loaded while card was collapsed, the video is still hidden — show it now
+        if(video.readyState>=1&&video.style.visibility==='hidden'){
+          if(loadingDiv.isConnected) loadingDiv.remove();
+          video.style.visibility=''; video.style.height=''; video.style.margin='';
+        }
+      }
+    });
+    hdr.querySelector('.sc-dl-btn-sm').addEventListener('click',()=>{
+      // Snapshot trim state for a full-clip save — don't mutate clip object
+      // since downloadClip is async and the queue may not run until later
+      const snapClip=Object.assign({},clip,{trimIn:0,trimOut:clip.duration});
+      downloadClip(snapClip);
+    });
+    hdr.querySelector('.sc-del-btn').addEventListener('click',()=>{
+      URL.revokeObjectURL(clip.blobUrl); clip.blobUrl=null;
+      if(clip.thumbUrl){URL.revokeObjectURL(clip.thumbUrl); clip.thumbUrl=null;}
+      clips.splice(clips.findIndex(c=>c.id===clip.id),1);
+      dragAbort.abort(); // clean up drag listeners
+      card.remove();
+    });
 
     const video=body.querySelector('.sc-clip-video');
     const loadingDiv=document.createElement('div'); loadingDiv.style.cssText='padding:20px;text-align:center;font-size:10px;opacity:0.5;'; loadingDiv.textContent='Loading…';
-    body.insertBefore(loadingDiv,video); video.style.display='none';
+    body.insertBefore(loadingDiv,video);
+    // video is visibility:hidden;height:0 until loadedmetadata fires
+    // This keeps it in the DOM so Chrome loads the blob regardless of card expand state
+    let videoErrorShown = false;
+    video.addEventListener('error',()=>{
+      if(videoErrorShown) return; // don't show twice or loop
+      videoErrorShown = true;
+      if(loadingDiv.isConnected) loadingDiv.remove();
+      const errDiv=document.createElement('div');
+      errDiv.style.cssText='padding:10px 6px;text-align:center;font-size:10px;color:rgba(0,0,0,0.45);background:rgba(0,0,0,0.05);border-radius:3px;margin-top:5px;';
+      errDiv.textContent='Preview unavailable — use Save MP4 to download';
+      video.insertAdjacentElement('afterend',errDiv);
+      video.style.visibility='hidden'; video.style.height='0'; video.style.margin='0';
+    });
 
     const playBtn=body.querySelector('.sc-play-btn');
     const timeDisp=body.querySelector(`#sc-time-${clip.id}`);
@@ -948,16 +1248,38 @@
     }
 
     // Update from actual video metadata — timestamp estimate is a rounded integer
-    video.addEventListener('loadedmetadata', () => {
-      loadingDiv.remove(); video.style.display = '';
+    // MUST be attached before any video.load() call below, otherwise the event
+    // can fire before the listener is registered and the video stays hidden forever
+    function revealVideo() {
+      if(loadingDiv.isConnected) loadingDiv.remove();
+      video.style.visibility=''; video.style.height=''; video.style.margin='';
       if (video.duration && isFinite(video.duration) && video.duration > 0) {
         clip.duration = video.duration;
         clip.trimOut  = video.duration;
         updateTrim();
+      } else if (!isFinite(video.duration)) {
+        video.currentTime = 1e10;
+        video.addEventListener('seeked', () => {
+          if (isFinite(video.duration) && video.duration > 0) {
+            clip.duration = video.duration;
+            clip.trimOut  = video.duration;
+            updateTrim();
+          }
+          video.currentTime = 0;
+        }, { once: true });
       }
-    }, { once: true });
+    }
 
-    playBtn.addEventListener('click',()=>{if(video.paused){video.currentTime=Math.max(clip.trimIn,video.currentTime);video.play().catch(()=>{})}else video.pause();});
+    video.addEventListener('loadedmetadata', revealVideo, { once: true });
+
+    playBtn.addEventListener('click',()=>{
+      if(video.paused){
+        video.currentTime=Math.max(clip.trimIn,video.currentTime);
+        // Don't call video.load() here — it resets the decoder and can trigger
+        // new error events causing a crash loop. Just play() and let it buffer.
+        video.play().catch(()=>{});
+      }else video.pause();
+    });
     video.addEventListener('play',()=>{playBtn.textContent='⏸';});
     video.addEventListener('pause',()=>{playBtn.textContent='▶';});
     video.addEventListener('ended',()=>{playBtn.textContent='▶';video.currentTime=clip.trimIn;});
@@ -965,7 +1287,18 @@
     const muteBtn=body.querySelector('.sc-mute-btn'); video.muted=true;
     muteBtn.addEventListener('click',()=>{video.muted=!video.muted;muteBtn.textContent=video.muted?'🔇':'🔊';});
 
-    function safeSeek(time){video.currentTime=Math.max(clip.trimIn,Math.min(clip.trimOut,time));}
+    function safeSeek(time){
+      if(video.readyState<1) return; // not loaded enough to seek
+      const wasPlaying=!video.paused;
+      const t=Math.max(clip.trimIn,Math.min(clip.trimOut,time));
+      try{
+        video.currentTime=t;
+        // Resume if was playing — seek interrupts playback
+        if(wasPlaying){
+          video.addEventListener('seeked',()=>video.play().catch(()=>{}),{once:true});
+        }
+      }catch(e){}
+    }
     body.querySelectorAll('.sc-skip-btn').forEach(btn=>btn.addEventListener('click',()=>safeSeek(video.currentTime+parseFloat(btn.dataset.skip))));
 
     card.setAttribute('tabindex','-1');
@@ -986,8 +1319,10 @@
       if(drag==='in'){clip.trimIn=Math.max(0,Math.min(s,clip.trimOut-0.5));video.currentTime=clip.trimIn;}
       else{clip.trimOut=Math.min(clip.duration,Math.max(s,clip.trimIn+0.5));video.currentTime=clip.trimOut;}
       updateTrim();
-    });
-    document.addEventListener('mouseup',()=>{drag=null;});
+    },{signal:dragAbort.signal});
+    document.addEventListener('mouseup',()=>{drag=null;},{signal:dragAbort.signal});
+    // Clean up global listeners when card is deleted
+    hdr.querySelector('.sc-del-btn').addEventListener('click',()=>dragAbort.abort(),{once:true});
 
     body.querySelectorAll('.sc-qbtn[data-sec]').forEach(btn=>btn.addEventListener('click',()=>{clip.trimOut=Math.min(clip.duration,clip.trimIn+parseInt(btn.dataset.sec));updateTrim();video.currentTime=clip.trimIn;}));
     body.querySelector('.sc-qbtn-reset').addEventListener('click',()=>{clip.trimIn=0;clip.trimOut=clip.duration;updateTrim();});
@@ -997,7 +1332,7 @@
     return card;
   }
 
-  function updateClipStatus(clipId,msg){const el=document.getElementById('sc-cst-'+clipId);if(el){el.textContent=msg;el.style.display=msg?'':'none';}}
+  function updateClipStatus(clipId,msg,isErr=false){const el=document.getElementById('sc-cst-'+clipId);if(el){el.textContent=msg;el.style.display=msg?'':'none';el.style.color=isErr?'var(--base-primary,#df4e1e)':'';el.style.fontWeight=isErr?'700':'';}}
   function formatDuration(sec){const m=Math.floor(sec/60),s=Math.floor(sec%60);return m>0?m+':'+String(s).padStart(2,'0'):s+'s';}
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1031,12 +1366,16 @@
       .sc-btn { font-size:13px;padding:1px 5px;border:1px solid rgba(0,0,0,0.22);border-radius:3px;background:transparent;color:rgba(0,0,0,0.6);cursor:pointer;transition:color 0.12s,border-color 0.12s; }
       .sc-btn:hover { border-color:var(--base-primary,#df4e1e);color:var(--base-primary,#df4e1e); }
 
-      #sc-settings { position:absolute;right:0;top:calc(100% + 4px);background:var(--base-light,#dddec4);background-image:var(--base-texture-background);border:1px solid rgba(0,0,0,0.2);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.2);z-index:9999;padding:10px;min-width:230px; }
+      #sc-settings { position:fixed;background:var(--base-light,#dddec4);background-image:var(--base-texture-background);border:1px solid rgba(0,0,0,0.2);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.2);z-index:2147483640;padding:10px;min-width:230px; }
       .sc-toggle-btn { font-size:10px;font-weight:700;padding:2px 8px;background:rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.2);border-radius:3px;cursor:pointer;min-width:40px;text-align:center;transition:background 0.1s,color 0.1s; }
       .sc-toggle-btn--on { background:rgba(223,78,30,0.15);border-color:var(--base-primary,#df4e1e);color:var(--base-primary,#df4e1e); }
 
       #sc-body { background:var(--base-light,#dddec4);background-image:var(--base-texture-background); }
       .sc-inner { padding:8px;display:flex;flex-direction:column;gap:8px; }
+      #sc-clips-list { max-height:520px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(0,0,0,0.2) transparent; }
+      #sc-clips-list::-webkit-scrollbar { width:4px; }
+      #sc-clips-list::-webkit-scrollbar-track { background:transparent; }
+      #sc-clips-list::-webkit-scrollbar-thumb { background:rgba(0,0,0,0.2);border-radius:2px; }
       .sc-sublabel { font-size:9px;opacity:0.55;color:rgba(0,0,0,0.7); }
       .sc-status--ok      { color:var(--base-secondary,#26b64b)!important;opacity:1!important; }
       .sc-status--err     { color:var(--base-primary,#df4e1e)!important;opacity:1!important; }
@@ -1093,6 +1432,7 @@
       .sc-del-btn { padding:2px 6px;font-size:10px;background:var(--base-light,#dddec4);border:1px solid rgba(0,0,0,0.2);border-radius:3px;color:rgba(0,0,0,0.45);cursor:pointer;transition:background 0.1s; }
       .sc-del-btn:hover { background:rgba(223,78,30,0.15);color:var(--base-primary,#df4e1e); }
       .sc-clip-status { font-size:9px;color:rgba(0,0,0,0.45);padding:2px 0; }
+
     `);
   }
 
