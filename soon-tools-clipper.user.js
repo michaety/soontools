@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.3.0
+// @version      1.3.1
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -685,7 +685,7 @@
   let ffmpegRunning = false;
 
   async function getOrLoadFFmpeg() {
-    if(ffmpegCached) return ffmpegCached; // caller's wait loop handles ffmpegRunning
+    if(ffmpegCached) return ffmpegCached;
     if(ffmpegLoadPromise) return ffmpegLoadPromise;
     ffmpegLoadPromise = (async () => {
       await loadScript('https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js');
@@ -951,7 +951,7 @@
       inner.innerHTML='<div id="sc-status-row" class="sc-sublabel" style="min-height:13px;"></div><div id="sc-clips-list"></div>';
       body.appendChild(inner); root.appendChild(hdr); root.appendChild(body);
 
-      function initPosition(cb){
+      function initPosition(cb,attempts=0){
         const ftfpMap=document.getElementById('ftfp-map');
         const chatInput=document.getElementById('chat-input');
         if(ftfpMap){ftfpMap.insertAdjacentElement('afterend',root);cb();startRejectionWatcher();return;}
@@ -962,7 +962,8 @@
             cb(); startRejectionWatcher(); return;
           }
         }
-        setTimeout(()=>initPosition(cb),300);
+        if(attempts<33) setTimeout(()=>initPosition(cb,attempts+1),300);
+        else { document.body.appendChild(root); cb(); startRejectionWatcher(); } // fallback
       }
 
       // Watch for React wiping our root out of the DOM and re-inject cleanly
@@ -1025,7 +1026,7 @@
         });
 
         showStatus('Click ⏺ to record • 📷 to screenshot','');
-        console.log('[SOON CLIP] UI injected v5.1.0');
+        console.log('[SOON CLIP] UI injected v5.2.0');
       });
     }
 
