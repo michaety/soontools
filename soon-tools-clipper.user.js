@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.3.1
+// @version      1.5.1
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -666,8 +666,16 @@
   // Cached once at startup — no need to re-probe on every recording
   // VP8 preferred over VP9: more predictable keyframe intervals for MediaRecorder chunks,
   // resulting in more reliable blob playback in the preview player.
-  const SUPPORTED_MIME = ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm','video/mp4']
-    .find(t=>MediaRecorder.isTypeSupported(t))||'';
+  // Prefer H.264/AAC MP4 recording — allows stream copy into MP4 without re-encode.
+  // VP8/VP9 WebM requires full video re-encode to get into MP4, which crashes the tab.
+  const SUPPORTED_MIME = [
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2', // H.264 + AAC — ideal, c:copy into MP4 works
+    'video/mp4;codecs=avc1',                    // H.264, any AAC
+    'video/mp4',                                // MP4 generic
+    'video/webm;codecs=vp8,opus',               // Fallback WebM
+    'video/webm;codecs=vp9,opus',
+    'video/webm',
+  ].find(t=>MediaRecorder.isTypeSupported(t))||'';
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ── FFMPEG ─────────────────────────────────────────────────────────────────
@@ -770,7 +778,7 @@
       if(ffmpegRunning) throw new Error('FFmpeg still busy after 15s — try again');
       ffmpegRunning=true;
       const inputData=await fetchFile(clip.blobUrl);
-      ff.FS('writeFile','input.webm',inputData);
+      ff.FS('writeFile','input.webm',inputData); // named .webm for ffmpeg input regardless of container
 
       async function runFFmpeg(args) {
         try { await ff.run(...args); } catch(e) {
@@ -784,8 +792,7 @@
       // Audio-only re-encode is negligible CPU cost vs full video re-encode.
       await runFFmpeg([
         '-i','input.webm',...trimArgs,
-        '-c:v','copy',
-        '-c:a','aac','-b:a','128k',
+        '-c','copy',
         '-movflags','+faststart','-y','output.mp4'
       ]);
 
