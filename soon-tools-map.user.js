@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Map
 // @namespace    https://fishtank.news
-// @version      3.2.6
+// @version      3.2.7
 // @description  Enhances Fishtank's native map — click any room to switch cam, syncs with stream. By fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -95,6 +95,12 @@
   let _activeRoomId     = null;
   let _switchingSlug    = null;
   let _lastDetectedSlug = null;
+
+  // Cleanup handles — collected and released on beforeunload
+  const _cleanupAC         = new AbortController(); // aborts all document event listeners
+  let _streamWatchInterval = null;
+  let _mapObserver         = null;
+  let _floorGuard          = null;
 
   // Cache: { BALT: { zoneIndex: 1, points: "0.35,0.00 ..." }, ... }
   const altZoneCache = {};
@@ -295,32 +301,37 @@
       console.log('[SOON] poll attempt', attempts, '— found', polygons.length, 'polygon.absolute elements');
 
       if (polygons.length > targetIdx) {
+        // Capture element reference NOW — avoids re-querying after a 300ms gap
+        // where the element may have shifted index or been removed.
+        const poly = polygons[targetIdx];
         done = true;
         clearInterval(poll);
         setTimeout(() => {
-          const poly = document.querySelectorAll('polygon.absolute')[targetIdx];
-          if (poly) {
-            firePolygonClick(poly);
-            onRoomSelected(altId);
-            console.log('[SOON] alt cam switched:', altId);
-            // Use a MutationObserver to catch the map floor change the instant it happens
-            const mapImg = document.querySelector('img[src*="map/s5/"]');
-            if (mapImg) {
-              const floorGuard = new MutationObserver(() => {
-                if (mapImg.src && !mapImg.src.includes('lower')) {
-                  // Immediately revert the src to downstairs before the browser paints
-                  mapImg.src = mapImg.src.replace(/upper/, 'lower');
-                  const downBtn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Downstairs');
-                  if (downBtn) downBtn.click();
-                  console.log('[SOON] intercepted floor switch, reverted to downstairs');
-                }
-              });
-              floorGuard.observe(mapImg, { attributes: true, attributeFilter: ['src'] });
-              // Stop observing after 2 seconds
-              setTimeout(() => floorGuard.disconnect(), 2000);
-            }
-          } else {
-            console.warn('[SOON] polygon disappeared before click for', altId);
+          // Verify element is still in the DOM before clicking
+          if (!poly.isConnected) {
+            console.warn('[SOON] polygon removed before click for', altId);
+            return;
+          }
+          firePolygonClick(poly);
+          onRoomSelected(altId);
+          console.log('[SOON] alt cam switched:', altId);
+          // Use a MutationObserver to catch the map floor change the instant it happens.
+          // Disconnect any previous guard first — rapid switches would otherwise accumulate observers.
+          const mapImg = document.querySelector('img[src*="map/s5/"]');
+          if (mapImg) {
+            if (_floorGuard) _floorGuard.disconnect();
+            _floorGuard = new MutationObserver(() => {
+              if (mapImg.src && !mapImg.src.includes('lower')) {
+                // Immediately revert the src to downstairs before the browser paints
+                mapImg.src = mapImg.src.replace(/upper/, 'lower');
+                const downBtn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Downstairs');
+                if (downBtn) downBtn.click();
+                console.log('[SOON] intercepted floor switch, reverted to downstairs');
+              }
+            });
+            _floorGuard.observe(mapImg, { attributes: true, attributeFilter: ['src'] });
+            // Stop observing after 2 seconds
+            setTimeout(() => { if (_floorGuard) { _floorGuard.disconnect(); _floorGuard = null; } }, 2000);
           }
         }, 300);
       } else if (attempts >= 40) {
@@ -474,8 +485,9 @@
       }
     }
 
-    const obs = new MutationObserver(updateOverlayVisibility);
-    obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    if (_mapObserver) _mapObserver.disconnect();
+    _mapObserver = new MutationObserver(updateOverlayVisibility);
+    _mapObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     [500, 1500, 3000].forEach(ms => setTimeout(updateOverlayVisibility, ms));
   }
 
@@ -484,15 +496,23 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   function muteMapHoverSounds() {
+    // Guard against double-patching if script reloads — chained wraps would
+    // make _origPlay point to the already-wrapped function, breaking audio.
+    if (HTMLAudioElement.prototype.__soonPatched__) {
+      console.log('[SOON] map hover sound intercept already active — skipping');
+      return;
+    }
+    HTMLAudioElement.prototype.__soonPatched__ = true;
+
     // Track whether we're in a hover event — only mute sounds triggered by hover
     let _inHover = false;
-
-    document.addEventListener('mouseenter', () => { _inHover = true; }, true);
-    document.addEventListener('mouseover', () => { _inHover = true; }, true);
-    document.addEventListener('mouseleave', () => { _inHover = false; }, true);
-    document.addEventListener('mouseout', () => { _inHover = false; }, true);
+    const sig = { capture: true, signal: _cleanupAC.signal };
+    document.addEventListener('mouseenter', () => { _inHover = true; }, sig);
+    document.addEventListener('mouseover',  () => { _inHover = true; }, sig);
+    document.addEventListener('mouseleave', () => { _inHover = false; }, sig);
+    document.addEventListener('mouseout',   () => { _inHover = false; }, sig);
     // Click resets hover flag so click sounds play
-    document.addEventListener('click', () => { _inHover = false; }, true);
+    document.addEventListener('click',      () => { _inHover = false; }, sig);
 
     const _origPlay = HTMLAudioElement.prototype.play;
     HTMLAudioElement.prototype.play = function() {
@@ -522,11 +542,12 @@
       if (room) {
         setTimeout(() => onRoomSelected(room.id), 200);
       }
-    }, true);
+    }, { capture: true, signal: _cleanupAC.signal });
   }
 
   function watchStreamChanges() {
-    setInterval(() => {
+    if (_streamWatchInterval) clearInterval(_streamWatchInterval);
+    _streamWatchInterval = setInterval(() => {
       try {
         const entries = (unsafeWindow || window).performance.getEntriesByType('resource');
         const recent = entries.slice(-50);
@@ -567,8 +588,20 @@
         }
         el = el.parentElement;
       }
-    }, true);
+    }, { capture: true, signal: _cleanupAC.signal });
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ── CLEANUP ────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function cleanup() {
+    if (_streamWatchInterval) { clearInterval(_streamWatchInterval); _streamWatchInterval = null; }
+    if (_mapObserver)         { _mapObserver.disconnect();           _mapObserver = null; }
+    if (_floorGuard)          { _floorGuard.disconnect();            _floorGuard = null; }
+    _cleanupAC.abort(); // removes all document event listeners registered with _cleanupAC.signal
+  }
+  window.addEventListener('beforeunload', cleanup);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ── INIT ───────────────────────────────────────────────────────────────────
@@ -588,7 +621,7 @@
     muteMapHoverSounds();
     loadStreams();
 
-    console.log('[SOON] Soon Map v3.2.6 ready');
+    console.log('[SOON] Soon Map v3.2.7 ready');
   }
 
   if (document.readyState !== 'loading') init();

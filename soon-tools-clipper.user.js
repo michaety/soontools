@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.1
+// @version      1.5.2
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -434,11 +434,10 @@
       }
       if (cv !== this._lastVid) {
         this._lastVid = cv;
-        if (this.multiCam) {
-          // Multi-cam: show static frames during cam transition
-          this._staticFrames = 20;
-        }
         // Split-clip: cam change handled by _watchCam stopping the recording
+        // Multi-cam: no static here — readyState < 2 path already covered the
+        // loading gap. Adding frames here after the stream is ready causes a
+        // second static burst immediately after the first one clears.
       }
       if (this._staticFrames > 0) {
         this._drawStatic(this._canvas.width, this._canvas.height);
@@ -477,9 +476,11 @@
         this._splitDebounce = true;
         setTimeout(() => { this._splitDebounce = false; }, 2000);
         if (this.multiCam) {
-          // Multi-cam: start static immediately at the switch point
+          // Multi-cam: the readyState < 2 path in _drawFrame will naturally show
+          // static during the actual loading gap — no pre-emptive static needed here.
+          // Pre-priming _staticFrames while the old stream is still buffered causes
+          // a false static burst before the real loading gap, creating a double-static.
           console.log('[SOON CLIP] Cam switch — continuing (multi-cam mode)');
-          this._staticFrames = 20; // prime static so _drawFrame shows it immediately
         } else {
           // Split-clip: stop current and start fresh after it fully finalises
           console.log('[SOON CLIP] Cam split — new clip');
@@ -603,15 +604,20 @@
     v.style.cssText='position:fixed;left:-9999px;width:120px;height:68px;opacity:0;pointer-events:none;';
     document.body.appendChild(v);
 
+    // AbortController removes all listeners atomically on cleanup,
+    // preventing callbacks from firing on a detached element.
+    const ac=new AbortController();
     let cleaned=false;
     const cleanup=()=>{
       if(cleaned)return; cleaned=true;
-      clearTimeout(timeout); v.remove(); URL.revokeObjectURL(url);
+      clearTimeout(timeout);
+      ac.abort(); // removes all event listeners below
+      v.remove(); URL.revokeObjectURL(url);
     };
     const timeout=setTimeout(cleanup,5000);
 
     // preload=metadata: loadedmetadata fires, then seek to 0.5s triggers seeked
-    v.addEventListener('loadedmetadata',()=>{v.currentTime=0.5;});
+    v.addEventListener('loadedmetadata',()=>{v.currentTime=0.5;},{signal:ac.signal});
     v.addEventListener('seeked',()=>{
       try{
         const c=document.createElement('canvas'); c.width=120; c.height=68;
@@ -623,8 +629,8 @@
         cb(c.toDataURL('image/jpeg',0.7));
       }catch(e){}
       cleanup();
-    });
-    v.addEventListener('error',cleanup);
+    },{signal:ac.signal});
+    v.addEventListener('error',cleanup,{signal:ac.signal});
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1444,7 +1450,15 @@
     `);
   }
 
-  function init(){addStyles();buildUI();}
+  function init(){
+    addStyles();
+    buildUI();
+    // Tear down any active recording on navigation — prevents MediaRecorder and
+    // timers from leaking into an unloaded page context.
+    window.addEventListener('beforeunload', () => {
+      if (activeSession?.isActive) activeSession.destroy();
+    });
+  }
   init();
 
 })();
