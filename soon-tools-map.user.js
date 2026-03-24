@@ -162,7 +162,7 @@
         });
 
         if (idx !== -1) {
-          altZoneCache[altId] = { zoneIndex: idx };
+          altZoneCache[altId] = { zoneIndex: idx, points: zones[idx].points || '' };
           console.log('[SOON] alt zone cached:', altId, '→ index', idx);
         } else {
           console.warn('[SOON] alt zone not found for', altId, '— metadata:', zones.map(z => z.action?.metadata || '?'));
@@ -253,33 +253,41 @@
 
     console.log('[SOON] switchToAltCam:', altId, 'zone index:', cached.zoneIndex);
 
-    // Step 1: make sure we're on the parent room
-    if (_activeRoomId !== altDef.parentId) {
+    // Step 1: make sure we're on the parent room.
+    // If switching rooms, wait for the old polygons to be replaced before polling.
+    const needsSwitch = _activeRoomId !== altDef.parentId;
+    if (needsSwitch) {
       clickTab(altDef.parentId);
       onRoomSelected(altDef.parentId);
     }
+    const pollDelay = needsSwitch ? 300 : 0; // brief wait for parent stream polygons
 
-    // Step 2: poll for zone polygons over the video, then click the right one
+    // Step 2: poll for zone polygons over the video, then click the right one.
+    // Match by points attribute first (stable across DOM reorder), fall back to index.
     const targetIdx = cached.zoneIndex;
+    const targetPoints = cached.points || '';
     let attempts = 0;
     let done = false;
 
+    setTimeout(() => {
     const poll = setInterval(() => {
       if (done) { clearInterval(poll); return; }
       attempts++;
 
-      // Zone polygons sit over the video — they have class "absolute"
       const polygons = document.querySelectorAll('polygon.absolute');
       console.log('[SOON] poll attempt', attempts, '— found', polygons.length, 'polygon.absolute elements');
 
       if (polygons.length > targetIdx) {
-        // Capture element reference NOW — avoids re-querying after a 300ms gap
-        // where the element may have shifted index or been removed.
-        const poly = polygons[targetIdx];
+        // Match by points attribute — immune to DOM reordering
+        let poly = null;
+        if (targetPoints) {
+          poly = [...polygons].find(p => p.getAttribute('points') === targetPoints);
+        }
+        // Fall back to index if points matching fails
+        if (!poly) poly = polygons[targetIdx];
         done = true;
         clearInterval(poll);
         setTimeout(() => {
-          // Verify element is still in the DOM before clicking
           if (!poly.isConnected) {
             console.warn('[SOON] polygon removed before click for', altId);
             return;
@@ -305,12 +313,13 @@
             // Stop observing after 2 seconds
             setTimeout(() => { if (_floorGuard) { _floorGuard.disconnect(); _floorGuard = null; } }, 2000);
           }
-        }, 300);
+        }, 100);
       } else if (attempts >= 40) {
         clearInterval(poll);
         console.warn('[SOON] alt zone polygon never appeared for', altId, '(found', polygons.length, ', need idx', targetIdx, ')');
       }
     }, 150);
+    }, pollDelay);
 
     return true;
   }
