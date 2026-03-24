@@ -74,6 +74,7 @@
     { id: 'BALT',   label: 'Bar Alt',      slug: 'brrr2-5',      tab: 'Bar Alternate',   floor: 'down', streamKey: 'bar alternate'   },
     { id: 'DALT',   label: 'Dorm Alt',     slug: 'dmrm2-5',      tab: 'Dorm Alternate',  floor: 'down', streamKey: 'dorm alternate'  },
     { id: 'MALT',   label: 'Market Alt',   slug: 'mrke2-5',      tab: 'Market Alternate',floor: 'down', streamKey: 'market alternate'},
+    { id: 'JOBB',   label: 'Jungle Loft',  slug: 'jobb-5',       tab: null,              floor: 'up',   streamKey: 'jungle loft'    },
   ];
 
   // Alt cameras are accessed by clicking zone polygons on the parent stream's video overlay.
@@ -82,6 +83,7 @@
     'BALT': { parentId: 'BAR',    parentSlug: 'brrr-5', altSlug: 'brrr2-5' },
     'DALT': { parentId: 'DORM',   parentSlug: 'dmrm-5', altSlug: 'dmrm2-5' },
     'MALT': { parentId: 'MARKET', parentSlug: 'mrke-5', altSlug: 'mrke2-5' },
+    'JOBB': { parentId: 'HALLU',  parentSlug: 'hwup-5', altSlug: 'jobb-5'  },
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -279,16 +281,25 @@
       firePolygonClick(poly);
       onRoomSelected(altId);
       console.log('[SOON] alt cam switched:', altId);
-      // Guard against map floor change (alt cams are downstairs but site may flip to upstairs)
+      // Guard against map floor change — keep the map on the alt cam's floor
+      const altRoom = ROOMS.find(r => r.id === altId);
+      const wantFloor = altRoom?.floor || 'down';
       const mapImg = document.querySelector('img[src*="map/s5/"]');
       if (mapImg) {
         if (_floorGuard) _floorGuard.disconnect();
         _floorGuard = new MutationObserver(() => {
-          if (mapImg.src && !mapImg.src.includes('lower')) {
+          const wantLower = wantFloor === 'down';
+          const isLower = mapImg.src && mapImg.src.includes('lower');
+          if (wantLower && !isLower) {
             mapImg.src = mapImg.src.replace(/upper/, 'lower');
-            const downBtn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Downstairs');
-            if (downBtn) downBtn.click();
+            const floorBtn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Downstairs');
+            if (floorBtn) floorBtn.click();
             console.log('[SOON] intercepted floor switch, reverted to downstairs');
+          } else if (!wantLower && isLower) {
+            mapImg.src = mapImg.src.replace(/lower/, 'upper');
+            const floorBtn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Upstairs');
+            if (floorBtn) floorBtn.click();
+            console.log('[SOON] intercepted floor switch, reverted to upstairs');
           }
         });
         _floorGuard.observe(mapImg, { attributes: true, attributeFilter: ['src'] });
@@ -388,10 +399,11 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   const ALT_BUTTONS = [
-    ['BPTZ', 'PTZ', 43.0, 52.0, 7.0, 12.0],
-    ['BALT', 'ALT', 52.0, 82.0, 7.0, 12.0],
-    ['MALT', 'ALT', 71.0, 18.0, 7.0, 10.0],
-    ['DALT', 'ALT', 76.0, 33.0, 7.0, 12.0],
+    ['BPTZ', 'PTZ', 43.0, 52.0, 7.0, 12.0, 'down'],
+    ['BALT', 'ALT', 52.0, 82.0, 7.0, 12.0, 'down'],
+    ['MALT', 'ALT', 71.0, 18.0, 7.0, 10.0, 'down'],
+    ['DALT', 'ALT', 76.0, 33.0, 7.0, 12.0, 'down'],
+    ['JOBB', 'JOB', 25.0, 42.0, 6.0, 7.0, 'up'],
   ];
 
   let _altOverlay = null;
@@ -410,10 +422,11 @@
     overlay.id = 'soon-alt-overlay';
     overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;';
 
-    for (const [roomId, label, l, t, w, h] of ALT_BUTTONS) {
+    for (const [roomId, label, l, t, w, h, btnFloor] of ALT_BUTTONS) {
       const btn = document.createElement('button');
       btn.textContent = label;
       btn.dataset.soonRoom = roomId;
+      btn.dataset.floor = btnFloor;
       btn.style.cssText = [
         'position:absolute',
         `left:${l}%`, `top:${t}%`, `width:${w}%`, `height:${h}%`,
@@ -469,7 +482,11 @@
       const mapImg = document.querySelector('img[src*="map/s5/"]');
       if (!mapImg) return;
       const isDownstairs = mapImg.src.includes('lower');
-      _altOverlay.style.display = isDownstairs ? '' : 'none';
+      const currentFloor = isDownstairs ? 'down' : 'up';
+      _altOverlay.style.display = '';
+      for (const btn of _altOverlay.querySelectorAll('button[data-floor]')) {
+        btn.style.display = btn.dataset.floor === currentFloor ? '' : 'none';
+      }
       if (isDownstairs && !document.getElementById('soon-alt-overlay')) {
         _altOverlay = null;
         injectAltOverlay();
