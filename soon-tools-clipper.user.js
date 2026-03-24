@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.3
+// @version      1.5.4
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -854,12 +854,15 @@
         }
       }
 
-      const trimArgs = needsTrim ? ['-ss',clip.trimIn.toFixed(3),'-to',clip.trimOut.toFixed(3)] : [];
+      // -ss before -i for input-level seeking (accurate keyframe seek with -c copy)
+      // Use -t (duration) instead of -to (absolute) since -ss before -i resets timestamps to 0
+      const seekArgs = needsTrim ? ['-ss',clip.trimIn.toFixed(3)] : [];
+      const durArgs  = needsTrim ? ['-t',(clip.trimOut-clip.trimIn).toFixed(3)] : [];
       // Copy video stream (no decode/encode — fast), re-encode audio Opus→AAC
       // Opus audio cannot be stream-copied into MP4 container — AAC is required.
       // Audio-only re-encode is negligible CPU cost vs full video re-encode.
       await runFFmpeg([
-        '-i','input.webm',...trimArgs,
+        ...seekArgs,'-i','input.webm',...durArgs,
         '-c','copy',
         '-movflags','+faststart','-y','output.mp4'
       ]);
