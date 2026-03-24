@@ -253,73 +253,66 @@
 
     console.log('[SOON] switchToAltCam:', altId, 'zone index:', cached.zoneIndex);
 
-    // Step 1: make sure we're on the parent room.
-    // If switching rooms, wait for the old polygons to be replaced before polling.
+    // Step 1: make sure we're on the parent room
     const needsSwitch = _activeRoomId !== altDef.parentId;
     if (needsSwitch) {
       clickTab(altDef.parentId);
       onRoomSelected(altDef.parentId);
     }
-    const pollDelay = needsSwitch ? 300 : 0; // brief wait for parent stream polygons
 
-    // Step 2: poll for zone polygons over the video, then click the right one.
-    // Match by points attribute first (stable across DOM reorder), fall back to index.
+    // Step 2: find the right polygon and click it.
+    // Match by points attribute (stable across DOM reorder), fall back to index.
     const targetIdx = cached.zoneIndex;
     const targetPoints = cached.points || '';
-    let attempts = 0;
     let done = false;
 
-    setTimeout(() => {
-    const poll = setInterval(() => {
-      if (done) { clearInterval(poll); return; }
-      attempts++;
-
+    function tryClick() {
+      if (done) return true;
       const polygons = document.querySelectorAll('polygon.absolute');
-      console.log('[SOON] poll attempt', attempts, '— found', polygons.length, 'polygon.absolute elements');
-
-      if (polygons.length > targetIdx) {
-        // Match by points attribute — immune to DOM reordering
-        let poly = null;
-        if (targetPoints) {
-          poly = [...polygons].find(p => p.getAttribute('points') === targetPoints);
-        }
-        // Fall back to index if points matching fails
-        if (!poly) poly = polygons[targetIdx];
-        done = true;
-        clearInterval(poll);
-        setTimeout(() => {
-          if (!poly.isConnected) {
-            console.warn('[SOON] polygon removed before click for', altId);
-            return;
+      if (polygons.length <= targetIdx) return false;
+      let poly = targetPoints
+        ? [...polygons].find(p => p.getAttribute('points') === targetPoints)
+        : null;
+      if (!poly) poly = polygons[targetIdx];
+      if (!poly?.isConnected) return false;
+      done = true;
+      firePolygonClick(poly);
+      onRoomSelected(altId);
+      console.log('[SOON] alt cam switched:', altId);
+      // Guard against map floor change (alt cams are downstairs but site may flip to upstairs)
+      const mapImg = document.querySelector('img[src*="map/s5/"]');
+      if (mapImg) {
+        if (_floorGuard) _floorGuard.disconnect();
+        _floorGuard = new MutationObserver(() => {
+          if (mapImg.src && !mapImg.src.includes('lower')) {
+            mapImg.src = mapImg.src.replace(/upper/, 'lower');
+            const downBtn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Downstairs');
+            if (downBtn) downBtn.click();
+            console.log('[SOON] intercepted floor switch, reverted to downstairs');
           }
-          firePolygonClick(poly);
-          onRoomSelected(altId);
-          console.log('[SOON] alt cam switched:', altId);
-          // Use a MutationObserver to catch the map floor change the instant it happens.
-          // Disconnect any previous guard first — rapid switches would otherwise accumulate observers.
-          const mapImg = document.querySelector('img[src*="map/s5/"]');
-          if (mapImg) {
-            if (_floorGuard) _floorGuard.disconnect();
-            _floorGuard = new MutationObserver(() => {
-              if (mapImg.src && !mapImg.src.includes('lower')) {
-                // Immediately revert the src to downstairs before the browser paints
-                mapImg.src = mapImg.src.replace(/upper/, 'lower');
-                const downBtn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Downstairs');
-                if (downBtn) downBtn.click();
-                console.log('[SOON] intercepted floor switch, reverted to downstairs');
-              }
-            });
-            _floorGuard.observe(mapImg, { attributes: true, attributeFilter: ['src'] });
-            // Stop observing after 2 seconds
-            setTimeout(() => { if (_floorGuard) { _floorGuard.disconnect(); _floorGuard = null; } }, 2000);
-          }
-        }, 100);
-      } else if (attempts >= 40) {
-        clearInterval(poll);
-        console.warn('[SOON] alt zone polygon never appeared for', altId, '(found', polygons.length, ', need idx', targetIdx, ')');
+        });
+        _floorGuard.observe(mapImg, { attributes: true, attributeFilter: ['src'] });
+        setTimeout(() => { if (_floorGuard) { _floorGuard.disconnect(); _floorGuard = null; } }, 2000);
       }
-    }, 150);
-    }, pollDelay);
+      return true;
+    }
+
+    // If already on parent room, try immediately — no delay needed
+    if (!needsSwitch && tryClick()) return true;
+
+    // Otherwise poll until polygons appear (brief delay if we just switched rooms)
+    let attempts = 0;
+    setTimeout(() => {
+      const poll = setInterval(() => {
+        if (done) { clearInterval(poll); return; }
+        attempts++;
+        if (tryClick()) { clearInterval(poll); return; }
+        if (attempts >= 40) {
+          clearInterval(poll);
+          console.warn('[SOON] alt zone polygon never appeared for', altId);
+        }
+      }, 100);
+    }, needsSwitch ? 300 : 0);
 
     return true;
   }
