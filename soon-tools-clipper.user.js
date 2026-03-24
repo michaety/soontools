@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.4
+// @version      1.5.5
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -918,7 +918,8 @@
       if(screenshots.length>5){const e=screenshots.pop();URL.revokeObjectURL(e.blobUrl);}
       renderQueue();
       triggerDownload(blob,filename);
-      showStatus('Screenshot saved ✓','ok');
+      try{navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);}catch(_){}
+      showStatus('Screenshot saved + copied ✓','ok');
       vid.style.outline='3px solid #df4e1e';
       setTimeout(()=>{vid.style.outline='';},400);
     },'image/png');
@@ -975,6 +976,8 @@
     }
     makeShortcutRow('Record','sc_key_record');
     makeShortcutRow('Screenshot','sc_key_screenshot');
+    makeShortcutRow('Crop Record','sc_key_crop_record');
+    makeShortcutRow('Crop Screenshot','sc_key_crop_screenshot');
     panel._abort = shortcutAbort; // exposed so caller can abort on panel removal
     return panel;
   }
@@ -1122,8 +1125,11 @@
       if(['INPUT','TEXTAREA'].includes(document.activeElement?.tagName))return;
       if(e.key==='Escape'&&frameMode){cancelFrameMode();return;}
       const recKey=getShortcut('sc_key_record'), ssKey=getShortcut('sc_key_screenshot');
+      const cropRecKey=getShortcut('sc_key_crop_record'), cropSsKey=getShortcut('sc_key_crop_screenshot');
       if(recKey&&matchesShortcut(e,recKey)){e.preventDefault();if(recording)stopRecording();else{cropRegion=null;startRecording();}return;}
-      if(ssKey&&matchesShortcut(e,ssKey)){e.preventDefault();takeScreenshot(null);}
+      if(ssKey&&matchesShortcut(e,ssKey)){e.preventDefault();takeScreenshot(null);return;}
+      if(cropRecKey&&matchesShortcut(e,cropRecKey)){e.preventDefault();if(recording)stopRecording();else if(!frameMode){pendingAction='record';enterFrameMode();}return;}
+      if(cropSsKey&&matchesShortcut(e,cropSsKey)){e.preventDefault();if(!frameMode)enterCropScreenshot();}
     },{capture:true});
 
     // Wait for full page load (React hydration completes after window load on Next.js)
