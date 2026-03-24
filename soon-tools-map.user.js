@@ -297,13 +297,12 @@
       return true;
     }
 
-    // Try immediately — if already on parent room this often succeeds with zero delay.
-    // When switching rooms with points data, safe to poll immediately (won't match wrong polygons).
-    if (tryClick()) return true;
+    // If already on parent room, try immediately
+    if (!needsSwitch && tryClick()) return true;
 
-    // Poll until polygons appear. Delay only needed when switching rooms WITHOUT points data
-    // (index-only matching could hit stale polygons from the previous room).
-    const pollDelay = (needsSwitch && !targetPoints) ? 150 : 0;
+    // Poll until polygons appear. When switching rooms, wait for React to
+    // swap out the old polygons — points data from the API may not exactly
+    // match DOM attributes, so we can't rely on it to filter stale polygons.
     let attempts = 0;
     setTimeout(() => {
       const poll = setInterval(() => {
@@ -315,7 +314,7 @@
           console.warn('[SOON] alt zone polygon never appeared for', altId);
         }
       }, 100);
-    }, pollDelay);
+    }, needsSwitch ? 500 : 0);
 
     return true;
   }
