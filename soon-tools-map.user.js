@@ -9,10 +9,9 @@
 // @updateURL    https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-map.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-map.user.js
 // @grant        GM_xmlhttpRequest
-// @grant        GM_addStyle
 // @grant        unsafeWindow
 // @connect      api.fishtank.live
-// @connect      streams-g.fishtank.live
+// @connect      streams-k.fishtank.live
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -37,10 +36,9 @@
           resolve({
             ok: r.status >= 200 && r.status < 300,
             status: r.status,
-            text() { return Promise.resolve(r.responseText); },
             json() {
               try { return Promise.resolve(JSON.parse(r.responseText)); }
-              catch(e) { return Promise.reject(new Error('JSON parse failed')); }
+              catch(_) { return Promise.reject(new Error('JSON parse failed')); }
             }
           });
         },
@@ -98,7 +96,7 @@
 
   // Cleanup handles — collected and released on beforeunload
   const _cleanupAC         = new AbortController(); // aborts all document event listeners
-  let _streamWatchInterval = null; // legacy — now holds PerformanceObserver
+  let _streamWatcher = null;
   let _mapObserver         = null;
   let _floorGuard          = null;
 
@@ -164,7 +162,7 @@
         });
 
         if (idx !== -1) {
-          altZoneCache[altId] = { zoneIndex: idx, points: zones[idx].points || '' };
+          altZoneCache[altId] = { zoneIndex: idx };
           console.log('[SOON] alt zone cached:', altId, '→ index', idx);
         } else {
           console.warn('[SOON] alt zone not found for', altId, '— metadata:', zones.map(z => z.action?.metadata || '?'));
@@ -176,46 +174,20 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // ── ROOM STREAM SYNC ───────────────────────────────────────────────────────
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  function applyRoomStream(roomId) {
-    if (!allStreams.length) return;
-    if (roomId === _activeRoomId) return;
-    const room = ROOMS.find(r => r.id === roomId);
-    if (!room) return;
-    const key = room.streamKey.toLowerCase();
-    const match = allStreams.find(s => s.name?.toLowerCase().includes(key));
-    if (match) {
-      console.log('[FT] clip stream →', match.name, match.id);
-      window.SOON = window.SOON || {};
-      window.SOON.activeRoomId = roomId;
-      window.SOON.activeRoom   = room;
-      window.SOON.activeSlug   = room.slug;
-      window.SOON.activeM3u8   = slugToM3u8(room.slug);
-      if (typeof window.SOON.onRoomChange === 'function') {
-        window.SOON.onRoomChange(roomId, room, room.slug, window.SOON.activeM3u8);
-      }
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
   // ── ROOM SELECTION ─────────────────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════════
 
   function onRoomSelected(roomId) {
     _activeRoomId = roomId;
     const room = ROOMS.find(r => r.id === roomId);
-    applyRoomStream(roomId);
-    if (room?.slug) {
-      window.SOON = window.SOON || {};
-      window.SOON.activeRoomId = roomId;
-      window.SOON.activeRoom   = room;
-      window.SOON.activeSlug   = room.slug;
-      window.SOON.activeM3u8   = slugToM3u8(room.slug);
-      if (typeof window.SOON.onRoomChange === 'function') {
-        window.SOON.onRoomChange(roomId, room, room.slug, window.SOON.activeM3u8);
-      }
+    if (!room?.slug) return;
+    window.SOON = window.SOON || {};
+    window.SOON.activeRoomId = roomId;
+    window.SOON.activeRoom   = room;
+    window.SOON.activeSlug   = room.slug;
+    window.SOON.activeM3u8   = slugToM3u8(room.slug);
+    if (typeof window.SOON.onRoomChange === 'function') {
+      window.SOON.onRoomChange(roomId, room, room.slug, window.SOON.activeM3u8);
     }
   }
 
@@ -604,7 +576,7 @@
     // Event-driven: PerformanceObserver fires only when new resources load,
     // replacing the 1-second setInterval that polled the entire resource timing buffer.
     // Zero CPU cost when no new stream segments arrive.
-    if (_streamWatchInterval) { _streamWatchInterval.disconnect(); _streamWatchInterval = null; }
+    if (_streamWatcher) { _streamWatcher.disconnect(); _streamWatcher = null; }
     try {
       const observer = new PerformanceObserver((list) => {
         const entries = list.getEntries();
@@ -624,7 +596,7 @@
         }
       });
       observer.observe({ type: 'resource', buffered: false });
-      _streamWatchInterval = observer; // stored for cleanup
+      _streamWatcher = observer; // stored for cleanup
     } catch(e) {
       // Fallback for browsers that don't support PerformanceObserver (unlikely)
       console.warn('[SOON] PerformanceObserver unavailable, falling back to polling');
@@ -648,7 +620,7 @@
           }
         } catch(e) {}
       }, 1000);
-      _streamWatchInterval = { disconnect() { clearInterval(interval); } };
+      _streamWatcher = { disconnect() { clearInterval(interval); } };
     }
   }
 
@@ -679,7 +651,7 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   function cleanup() {
-    if (_streamWatchInterval) { _streamWatchInterval.disconnect();   _streamWatchInterval = null; }
+    if (_streamWatcher) { _streamWatcher.disconnect();   _streamWatcher = null; }
     if (_mapObserver)         { _mapObserver.disconnect();           _mapObserver = null; }
     if (_floorGuard)          { _floorGuard.disconnect();            _floorGuard = null; }
     _cleanupAC.abort(); // removes all document event listeners registered with _cleanupAC.signal

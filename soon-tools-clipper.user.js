@@ -25,7 +25,6 @@
   let frameMode     = false;
   let pendingAction = null;
   let cropRegion    = null;
-  let dragStart     = null;
   let mainVideoEl   = null;
   let recording     = false; // kept in sync with activeSession for UI guards
 
@@ -69,7 +68,8 @@
   function enterFrameMode() {
     const vid = getVideoEl();
     if (!vid) { showStatus('No video found', 'err'); return; }
-    frameMode = true; cropRegion = null; dragStart = null;
+    frameMode = true; cropRegion = null;
+    let dragStart = null;
     const wasPaused = vid.paused;
 
     function getVidRect() {
@@ -228,10 +228,8 @@
       this._recTimer   = null;
       this._borderTimer= null;
       this._autoStop   = null;
-      this._vid        = null;        // video element at session start
-      this._lastVid    = null;        // tracks current video for cam switch detection
+      this._vid        = null;        // current video element (updated on cam switch)
       this._lastSrc    = null;        // tracks src for split detection
-      this._staticFrames = 0;
       this._splitDebounce = false;
       this._goneCount  = 0;
       this.multiCam    = false; // set true for continuous multi-cam mode
@@ -244,14 +242,12 @@
 
       // rAF state
       this._lastDrawTs = 0;
-      this._rafId      = null;
     }
 
     async start() {
       const vid = getVideoEl();
       if (!vid) throw new Error('No video found');
       this._vid = vid;
-      this._lastVid = vid;
       this._lastSrc = vid.currentSrc || vid.src;
 
       // AudioContext — shared across sessions, must survive
@@ -304,7 +300,7 @@
       if (this.cropRegion) showRecordingCropOverlay(vid, this.cropRegion);
 
       // Start draw loop
-      this._rafId = requestAnimationFrame(ts => this._drawFrame(ts));
+      requestAnimationFrame(ts => this._drawFrame(ts));
 
       updateRecordBtn(false, true);
       showStatus('Recording — press ⏹ to stop', 'rec');
@@ -420,32 +416,26 @@
     _drawFrame(ts) {
       if (!this.isActive) return; // session ended — rAF loop stops here
       if (document.hidden || ts - this._lastDrawTs < 41.67) { // ~24fps, skip entirely when tab backgrounded
-        this._rafId = requestAnimationFrame(ts => this._drawFrame(ts));
+        requestAnimationFrame(ts => this._drawFrame(ts));
         return;
       }
       this._lastDrawTs = ts;
 
       // Prefer cached vid — only call getVideoEl() when it's stale
-      const cv = (this._lastVid?.readyState >= 2 && !this._lastVid.paused) ? this._lastVid : getVideoEl();
+      const cv = (this._vid?.readyState >= 2 && !this._vid.paused) ? this._vid : getVideoEl();
       if (!cv || cv.readyState < 2) {
         // Multi-cam: draw static to fill stream load gap
         // Split-clip: hold last frame (canvas retains it) — no static in the clip
         if (this.multiCam) this._drawStatic(this._canvas.width, this._canvas.height);
-        this._rafId = requestAnimationFrame(ts => this._drawFrame(ts));
+        requestAnimationFrame(ts => this._drawFrame(ts));
         return;
       }
-      if (cv !== this._lastVid) {
-        this._lastVid = cv;
+      if (cv !== this._vid) {
+        this._vid = cv;
         // Split-clip: cam change handled by _watchCam stopping the recording
         // Multi-cam: no static here — readyState < 2 path already covered the
         // loading gap. Adding frames here after the stream is ready causes a
         // second static burst immediately after the first one clears.
-      }
-      if (this._staticFrames > 0) {
-        this._drawStatic(this._canvas.width, this._canvas.height);
-        this._staticFrames--;
-        this._rafId = requestAnimationFrame(ts => this._drawFrame(ts));
-        return;
       }
       const cr = this.cropRegion;
       const vw = cv.videoWidth || 1920, vh = cv.videoHeight || 1080;
@@ -457,12 +447,12 @@
         if (this._canvas.width !== vw || this._canvas.height !== vh) { this._canvas.width = vw; this._canvas.height = vh; }
         this._ctx.drawImage(cv, 0, 0, vw, vh);
       }
-      this._rafId = requestAnimationFrame(ts => this._drawFrame(ts));
+      requestAnimationFrame(ts => this._drawFrame(ts));
     }
 
     _watchCam() {
       if (!this.isActive) return;
-      const cv = (this._lastVid?.readyState >= 2 && !this._lastVid.paused) ? this._lastVid : getVideoEl();
+      const cv = (this._vid?.readyState >= 2 && !this._vid.paused) ? this._vid : getVideoEl();
       if (!cv || cv.readyState === 0 || (cv.paused && cv.readyState < 2)) {
         if (++this._goneCount >= 10) { // ~5s at 500ms interval
           console.log('[SOON CLIP] Stream gone — stopping');
@@ -577,7 +567,11 @@
       if(el) el.textContent='Processing… '+ps+'s';
     },1000);
 
-    fixWebmDuration(chunksSnapshot,durationSec).then(fixedBuf=>{
+    // fixWebmDuration only applies to WebM — MP4 containers don't have the EBML Duration element
+    const fixDuration = mimeType.startsWith('video/mp4')
+      ? new Blob(chunksSnapshot).arrayBuffer()
+      : fixWebmDuration(chunksSnapshot,durationSec);
+    fixDuration.then(fixedBuf=>{
       clearInterval(pt);
       const blob=new Blob([fixedBuf],{type:mimeType});
       clip.blob=blob; clip.blobUrl=URL.createObjectURL(blob); clip.processing=false;
@@ -698,7 +692,6 @@
   // without the overhead of recreating the wasm instance each time.
   let ffmpegCached = null;
   let ffmpegLoadPromise = null;
-  let ffmpegRunning = false;
 
   async function getOrLoadFFmpeg() {
     if(ffmpegCached) return ffmpegCached;
@@ -777,14 +770,6 @@
       const FFmpegLib=win.FFmpeg;
       const{fetchFile}=FFmpegLib;
       if(!fetchFile) throw new Error('fetchFile not found');
-      // Wait for any concurrent run to finish — queue serialises calls but
-      // ffmpegRunning guards against the wasm internal state not resetting
-      let waited=0;
-      while(ffmpegRunning && waited<15000){
-        await new Promise(res=>setTimeout(res,100)); waited+=100;
-      }
-      if(ffmpegRunning) throw new Error('FFmpeg still busy after 15s — try again');
-      ffmpegRunning=true;
       const inputData=await fetchFile(clip.blobUrl);
       ff.FS('writeFile','input.webm',inputData); // named .webm for ffmpeg input regardless of container
 
@@ -818,7 +803,6 @@
       ffmpegCached=null;
       updateClipStatus(clip.id,'⚠ MP4 failed — click Save MP4 to retry', true);
     }finally{
-      ffmpegRunning=false;
       // Snap progress bar to 100% or reset on completion
       const bar=document.getElementById('sc-prog-'+clip.id);
       if(bar){bar.style.transition='width 0.2s ease';bar.style.width='100%';}
@@ -850,9 +834,8 @@
     }
     canvas.toBlob(blob=>{
       const filename='soontools_screenshot_'+Date.now()+'.png';
-      const dataUrl=canvas.toDataURL('image/jpeg',0.8);
       const blobUrl=URL.createObjectURL(blob);
-      const ss={id:Date.now(),blob,blobUrl,dataUrl,filename,label:(window.SOON.activeRoom?.label||'Screenshot')+' — '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})};
+      const ss={id:Date.now(),blob,blobUrl,filename,label:(window.SOON.activeRoom?.label||'Screenshot')+' — '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})};
       screenshots.unshift(ss);
       if(screenshots.length>5){const e=screenshots.pop();URL.revokeObjectURL(e.blobUrl);}
       renderQueue();
@@ -1002,7 +985,6 @@
         UI.recIndicator=document.getElementById('sc-rec-indicator');
         UI.statusEl=document.getElementById('sc-status-row');
         UI.clipsList=document.getElementById('sc-clips-list');
-        UI.recGroup=document.getElementById('sc-rec-group');
         UI.recFull=document.getElementById('sc-rec-full');
         UI.recCrop=document.getElementById('sc-rec-crop');
 
@@ -1109,7 +1091,7 @@
       const strip=document.createElement('div'); strip.className='sc-ss-strip';
       screenshots.forEach(ss=>{
         const cell=document.createElement('div'); cell.className='sc-ss-cell';
-        cell.innerHTML=`<img class="sc-ss-thumb" src="${ss.dataUrl}" title="${ss.label}"><div class="sc-ss-cell-actions"><button class="sc-ss-save" title="Save">↓</button><button class="sc-ss-del" title="Delete">✕</button></div>`;
+        cell.innerHTML=`<img class="sc-ss-thumb" src="${ss.blobUrl}" title="${ss.label}"><div class="sc-ss-cell-actions"><button class="sc-ss-save" title="Save">↓</button><button class="sc-ss-del" title="Delete">✕</button></div>`;
         cell.querySelector('.sc-ss-save').addEventListener('click',()=>triggerDownload(ss.blob,ss.filename));
         cell.querySelector('.sc-ss-del').addEventListener('click',()=>{URL.revokeObjectURL(ss.blobUrl);screenshots.splice(screenshots.findIndex(s=>s.id===ss.id),1);renderQueue();});
         cell.querySelector('.sc-ss-thumb').addEventListener('click',()=>window.open(ss.blobUrl,'_blank'));
