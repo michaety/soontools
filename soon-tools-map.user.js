@@ -349,23 +349,34 @@
     _switchingSlug = null;
   }
 
-  // Force the native map to show the correct floor
+  // Force the native map to show the correct floor.
+  // When floor is null (Director, Cameraman), freeze the map on its current floor.
+  //
+  // React replaces the <img> element on re-render, so MutationObserver on the old
+  // element doesn't work. Instead we poll — checking repeatedly after the click to
+  // catch and revert the change regardless of React's render timing.
   function ensureMapFloor(floor) {
-    if (!floor) return;
-    setTimeout(() => {
-      const mapImg = document.querySelector('img[src*="map/s5/"]');
-      if (!mapImg) return;
-      const isDown = mapImg.src.includes('lower');
-      const wantDown = floor === 'down';
-      if (isDown !== wantDown) {
-        const label = wantDown ? 'Downstairs' : 'Upstairs';
-        const btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === label);
-        if (btn) {
-          btn.click();
-          console.log('[SOON] forced map to', label);
-        }
+    const mapImg = document.querySelector('img[src*="map/s5/"]');
+    if (!mapImg) return;
+
+    // Snapshot which floor we want BEFORE native code acts
+    const currentlyDown = mapImg.src.includes('lower');
+    const wantDown = floor ? (floor === 'down') : currentlyDown;
+
+    function forceFloor() {
+      const img = document.querySelector('img[src*="map/s5/"]');
+      if (!img) return;
+      if (img.src.includes('lower') === wantDown) return; // already correct
+      const label = wantDown ? 'Downstairs' : 'Upstairs';
+      const btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === label);
+      if (btn) {
+        btn.click();
+        console.log('[SOON] forced map to', label);
       }
-    }, 300);
+    }
+
+    // Poll at multiple intervals to catch React re-renders.
+    [200, 400, 700, 1200].forEach(ms => setTimeout(forceFloor, ms));
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -634,7 +645,10 @@
           if (el.dataset?.fpRoom || el.closest('#ftfp-map')) break;
 
           const text = el.textContent?.trim().replace(/\d+$/, '').trim();
-          const room = ROOMS.find(r => r.tab && (text === r.tab || text === r.label));
+          const room = ROOMS.find(r => r.tab && (
+            text === r.tab || text === r.label ||
+            r.tab.startsWith(text) || r.label.startsWith(text)
+          ));
           if (room) {
             onRoomSelected(room.id);
             ensureMapFloor(room.floor);
