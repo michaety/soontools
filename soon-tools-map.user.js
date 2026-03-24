@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Map
 // @namespace    https://fishtank.news
-// @version      3.2.8
+// @version      3.2.9
 // @description  Enhances Fishtank's native map — click any room to switch cam, syncs with stream. By fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -297,10 +297,13 @@
       return true;
     }
 
-    // If already on parent room, try immediately — no delay needed
-    if (!needsSwitch && tryClick()) return true;
+    // Try immediately — if already on parent room this often succeeds with zero delay.
+    // When switching rooms with points data, safe to poll immediately (won't match wrong polygons).
+    if (tryClick()) return true;
 
-    // Otherwise poll until polygons appear (brief delay if we just switched rooms)
+    // Poll until polygons appear. Delay only needed when switching rooms WITHOUT points data
+    // (index-only matching could hit stale polygons from the previous room).
+    const pollDelay = (needsSwitch && !targetPoints) ? 150 : 0;
     let attempts = 0;
     setTimeout(() => {
       const poll = setInterval(() => {
@@ -312,7 +315,7 @@
           console.warn('[SOON] alt zone polygon never appeared for', altId);
         }
       }, 100);
-    }, needsSwitch ? 300 : 0);
+    }, pollDelay);
 
     return true;
   }
