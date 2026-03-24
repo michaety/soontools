@@ -19,7 +19,7 @@ Navigate the house using an interactive architectural floorplan overlay. Click a
 - Inherits fishtank.live's theme — looks native
 - Toggle between Map and Tabs view at any time
 
-[![Install Map](https://img.shields.io/badge/Install%20Map-v3.2.8-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-map.user.js)
+[![Install Map](https://img.shields.io/badge/Install%20Map-v3.2.9-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-map.user.js)
 
 ---
 
