@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.2
+// @version      1.5.3
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -198,7 +198,7 @@
   //   session.seconds         → elapsed seconds (for status display)
 
   // Shared assets — fetched once per page session, reused across recordings
-  const _assets = { logoImg: null, logoReady: false };
+  const _assets = { logoImg: null, logoReady: false, staticSoundBuf: null };
 
   function _loadAssets() {
     if(!_assets.logoImg) {
@@ -210,6 +210,29 @@
       });
       _assets.logoImg = img;
     }
+    // Preload static/cam-switch sound — fetch the raw bytes now, decode later
+    // when AudioContext is available (avoids creating AudioContext before user interaction)
+    if(!_assets.staticSoundBuf && !_assets._staticSoundRaw) {
+      _assets._staticSoundRaw = 'loading';
+      GM_xmlhttpRequest({
+        method:'GET', url:'https://cdn.fishtank.live/sounds/chunk-short.mp3',
+        responseType:'arraybuffer',
+        onload: r => { _assets._staticSoundRaw = r.response; _decodeStaticSound(); },
+        onerror: () => { _assets._staticSoundRaw = null; }
+      });
+    } else if (_assets._staticSoundRaw && _assets._staticSoundRaw !== 'loading' && !_assets.staticSoundBuf) {
+      _decodeStaticSound(); // raw bytes ready but AudioContext wasn't available last time
+    }
+  }
+
+  function _decodeStaticSound() {
+    if (_assets.staticSoundBuf || !_assets._staticSoundRaw || _assets._staticSoundRaw === 'loading' || !sharedAudioCtx) return;
+    const raw = _assets._staticSoundRaw;
+    _assets._staticSoundRaw = null; // consume — decodeAudioData detaches the buffer
+    sharedAudioCtx.decodeAudioData(raw).then(buf => {
+      _assets.staticSoundBuf = buf;
+      console.log('[SOON CLIP] Static sound decoded:', buf.duration.toFixed(1) + 's');
+    }).catch(() => { _assets.staticSoundBuf = null; });
   }
 
   class RecordingSession {
@@ -243,6 +266,12 @@
       this._staticCanvas = document.createElement('canvas');
       this._staticCanvas.width = 80; this._staticCanvas.height = 45;
       this._staticCtx = this._staticCanvas.getContext('2d');
+
+      // Static sound state — plays chunk-short.mp3 into the recording during cam switches
+      this._staticSoundNode = null;
+      this._staticSoundGain = null;
+      this._staticSoundPlaying = false; // true while sound is active OR already played this gap
+      this._staticSoundFired = false;   // true once fired for current static gap, reset when stream returns
 
       // rAF state
       this._lastDrawTs = 0;
@@ -383,10 +412,48 @@
     }
 
     _teardownAudio() {
+      this._stopStaticSound();
       if (this._audioNode && this._audioDst) {
         try { this._audioNode.disconnect(this._audioDst); } catch {}
       }
       this._audioNode = this._audioDst = null;
+    }
+
+    _startStaticSound() {
+      if (this._staticSoundFired) return; // already played for this static gap
+      const buf = _assets.staticSoundBuf;
+      if (!buf || buf === 'loading' || !sharedAudioCtx || !this._audioDst) return;
+      try {
+        const src = sharedAudioCtx.createBufferSource();
+        src.buffer = buf;
+        const gain = sharedAudioCtx.createGain();
+        gain.gain.value = 0.4; // mix at 40% to not overpower
+        src.onended = () => { this._staticSoundPlaying = false; }; // natural end cleanup
+        src.connect(gain);
+        // Route into the recording stream
+        gain.connect(this._audioDst);
+        // Also route to speakers so user hears it live
+        gain.connect(sharedAudioCtx.destination);
+        src.start();
+        this._staticSoundNode = src;
+        this._staticSoundGain = gain;
+        this._staticSoundPlaying = true;
+        this._staticSoundFired = true; // prevent re-triggering until stream returns
+      } catch(e) {
+        console.warn('[SOON CLIP] Static sound start failed:', e.message);
+      }
+    }
+
+    _stopStaticSound() {
+      if (!this._staticSoundPlaying) return;
+      try {
+        this._staticSoundNode?.stop();
+        this._staticSoundNode?.disconnect();
+        this._staticSoundGain?.disconnect();
+      } catch(e) {}
+      this._staticSoundNode = null;
+      this._staticSoundGain = null;
+      this._staticSoundPlaying = false;
     }
 
     _drawStatic(w, h) {
@@ -430,10 +497,16 @@
       if (!cv || cv.readyState < 2) {
         // Multi-cam: draw static to fill stream load gap
         // Split-clip: hold last frame (canvas retains it) — no static in the clip
-        if (this.multiCam) this._drawStatic(this._canvas.width, this._canvas.height);
+        if (this.multiCam) {
+          this._drawStatic(this._canvas.width, this._canvas.height);
+          this._startStaticSound();
+        }
         requestAnimationFrame(ts => this._drawFrame(ts));
         return;
       }
+      // Stream is back — stop static sound and reset for next gap
+      this._stopStaticSound();
+      this._staticSoundFired = false;
       if (cv !== this._vid) {
         this._vid = cv;
         // Split-clip: cam change handled by _watchCam stopping the recording
@@ -692,8 +765,6 @@
   let ffmpegQueue = Promise.resolve();
 
   // Cached FFmpeg instance — loaded once, reused across downloads.
-  // A run-level mutex (ffmpegRunning) prevents concurrent run() calls
-  // without the overhead of recreating the wasm instance each time.
   let ffmpegCached = null;
   let ffmpegLoadPromise = null;
 
@@ -1027,7 +1098,7 @@
         });
 
         showStatus('Click ⏺ to record • 📷 to screenshot','');
-        console.log('[SOON CLIP] UI injected v5.2.0');
+        console.log('[SOON CLIP] UI injected v1.5.3');
       });
     }
 
@@ -1441,6 +1512,7 @@
   function init(){
     addStyles();
     buildUI();
+    _loadAssets(); // preload logo + static sound early so they're cached before first recording
     // Tear down any active recording on navigation — prevents MediaRecorder and
     // timers from leaking into an unloaded page context.
     window.addEventListener('beforeunload', () => {

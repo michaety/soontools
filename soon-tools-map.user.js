@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Map
 // @namespace    https://fishtank.news
-// @version      3.2.7
+// @version      3.2.8
 // @description  Enhances Fishtank's native map — click any room to switch cam, syncs with stream. By fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -579,7 +579,7 @@
   function hookNativeMapClicks() {
     document.addEventListener('click', (e) => {
       const el = e.target;
-      if (el.tagName !== 'polygon' && el.tagName !== 'POLYGON') return;
+      if (el.tagName !== 'POLYGON') return;
 
       const slug = el.getAttribute('data-target-slug') ||
                    el.closest('[data-target-slug]')?.getAttribute('data-target-slug');
@@ -699,7 +699,7 @@
     muteMapHoverSounds();
     loadStreams();
 
-    console.log('[SOON] Soon Map v3.2.7 ready');
+    console.log('[SOON] Soon Map v3.2.8 ready');
   }
 
   if (document.readyState !== 'loading') init();
