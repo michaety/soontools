@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.5
+// @version      1.5.6
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -748,8 +748,9 @@
   // Prefer H.264/AAC MP4 recording — allows stream copy into MP4 without re-encode.
   // VP8/VP9 WebM requires full video re-encode to get into MP4, which crashes the tab.
   const SUPPORTED_MIME = [
-    'video/mp4;codecs=avc1.42E01E,mp4a.40.2', // H.264 + AAC — ideal, c:copy into MP4 works
-    'video/mp4;codecs=avc1',                    // H.264, any AAC
+    'video/mp4;codecs=avc3.42E01E,mp4a.40.2', // H.264 avc3 + AAC — handles resolution changes mid-recording
+    'video/mp4;codecs=avc3',                    // H.264 avc3, any AAC
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2', // H.264 avc1 fallback
     'video/mp4',                                // MP4 generic
     'video/webm;codecs=vp8,opus',               // Fallback WebM
     'video/webm;codecs=vp9,opus',
@@ -1438,10 +1439,10 @@
       .sc-icon-btn:last-child { border-right:none; }
       .sc-icon-btn:hover { background:rgba(0,0,0,0.15); }
       #sc-rec-group { border-color:var(--base-primary,#df4e1e); }
-      .sc-rec-btn { font-size:10px;font-weight:700;padding:2px 7px;background:var(--base-primary,#df4e1e);color:white;border:none;border-right:1px solid rgba(255,255,255,0.25);cursor:pointer;transition:opacity 0.1s;letter-spacing:0.04em; }
+      .sc-rec-btn { font-size:10px;font-weight:700;padding:2px 7px;background:#c0392b;color:white;border:none;border-right:1px solid rgba(255,255,255,0.25);cursor:pointer;transition:opacity 0.1s;letter-spacing:0.04em; }
       .sc-rec-btn:last-child { border-right:none; }
       .sc-rec-btn:hover { opacity:0.85; }
-      .sc-rec-btn--crop { background:rgba(223,78,30,0.7); }
+      .sc-rec-btn--crop { background:rgba(192,57,43,0.7); }
       .sc-rec-btn--stop { background:#c0392b;animation:sc-pulse 1.1s infinite; }
       .sc-rec-btn--full { border-right:none; }
       .sc-rec-btn--cancel { background:rgba(0,0,0,0.25);color:rgba(0,0,0,0.7); }
