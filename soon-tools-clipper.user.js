@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.6
+// @version      1.5.7
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -746,11 +746,12 @@
   // VP8 preferred over VP9: more predictable keyframe intervals for MediaRecorder chunks,
   // resulting in more reliable blob playback in the preview player.
   // Prefer H.264/AAC MP4 recording — allows stream copy into MP4 without re-encode.
-  // VP8/VP9 WebM requires full video re-encode to get into MP4, which crashes the tab.
+  // VP8/VP9 WebM falls back to full H.264 re-encode via ffmpeg.wasm (slower but Twitter-compatible).
   const SUPPORTED_MIME = [
-    'video/mp4;codecs=avc3.42E01E,mp4a.40.2', // H.264 avc3 + AAC — handles resolution changes mid-recording
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2', // H.264 avc1 + AAC — Twitter/X compatible
+    'video/mp4;codecs=avc1',                    // H.264 avc1 generic
+    'video/mp4;codecs=avc3.42E01E,mp4a.40.2', // H.264 avc3 fallback — handles resolution changes but Twitter rejects avc3
     'video/mp4;codecs=avc3',                    // H.264 avc3, any AAC
-    'video/mp4;codecs=avc1.42E01E,mp4a.40.2', // H.264 avc1 fallback
     'video/mp4',                                // MP4 generic
     'video/webm;codecs=vp8,opus',               // Fallback WebM
     'video/webm;codecs=vp9,opus',
@@ -832,10 +833,11 @@
   async function _runDownload(clip) {
     const needsTrim=clip.trimIn>0.1||clip.trimOut<clip.duration-0.1;
     // Animated progress bar — fills over estimated duration, no extra CPU
-    const estimatedMs = Math.min(30000, Math.max(5000, clip.duration * 800));
+    const isReencode = clip.mimeType?.startsWith('video/webm');
+    const estimatedMs = Math.min(isReencode?120000:30000, Math.max(5000, clip.duration * (isReencode?4000:800)));
     const statusEl = document.getElementById('sc-cst-'+clip.id);
     if(statusEl){
-      statusEl.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><span style="font-size:9px;opacity:0.6;">Converting…</span><div style="flex:1;height:3px;background:rgba(0,0,0,0.12);border-radius:2px;overflow:hidden;"><div id="sc-prog-'+clip.id+'" style="height:100%;width:0%;background:var(--base-primary,#df4e1e);border-radius:2px;transition:width '+estimatedMs+'ms linear;"></div></div></div>';
+      statusEl.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><span style="font-size:9px;opacity:0.6;">'+(isReencode?'Re-encoding to H.264…':'Converting…')+'</span><div style="flex:1;height:3px;background:rgba(0,0,0,0.12);border-radius:2px;overflow:hidden;"><div id="sc-prog-'+clip.id+'" style="height:100%;width:0%;background:var(--base-primary,#df4e1e);border-radius:2px;transition:width '+estimatedMs+'ms linear;"></div></div></div>';
       statusEl.style.display='';
       requestAnimationFrame(()=>{ const bar=document.getElementById('sc-prog-'+clip.id); if(bar) bar.style.width='90%'; });
     }
@@ -859,12 +861,21 @@
       // Use -t (duration) instead of -to (absolute) since -ss before -i resets timestamps to 0
       const seekArgs = needsTrim ? ['-ss',clip.trimIn.toFixed(3)] : [];
       const durArgs  = needsTrim ? ['-t',(clip.trimOut-clip.trimIn).toFixed(3)] : [];
-      // Copy video stream (no decode/encode — fast), re-encode audio Opus→AAC
-      // Opus audio cannot be stream-copied into MP4 container — AAC is required.
-      // Audio-only re-encode is negligible CPU cost vs full video re-encode.
+      // Strategy per source codec:
+      //   avc1 MP4 → stream copy (fast, Twitter-compatible)
+      //   avc3 MP4 → stream copy + tag as avc1 (fast, fixes Twitter rejection)
+      //   WebM VP8/VP9 → full H.264 re-encode (slow but necessary)
+      const isWebm = clip.mimeType?.startsWith('video/webm');
+      const isAvc3 = clip.mimeType?.includes('avc3');
+      const codecArgs = isWebm
+        ? ['-c:v','libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p',
+           '-c:a','aac','-b:a','128k']
+        : ['-c','copy'];
+      // avc3 is bitstream-identical to avc1 — just tag it as avc1 for Twitter
+      const tagArgs = isAvc3 ? ['-tag:v','avc1'] : [];
       await runFFmpeg([
         ...seekArgs,'-i','input.webm',...durArgs,
-        '-c','copy',
+        ...codecArgs,...tagArgs,
         '-movflags','+faststart','-y','output.mp4'
       ]);
 
