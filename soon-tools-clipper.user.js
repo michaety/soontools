@@ -154,12 +154,16 @@
       exitFrameMode();
       if (!recording&&!wasPaused) vid.play().catch(()=>{});
       const action=pendingAction; pendingAction=null;
-      if (action==='screenshot') {
-        const region = cropRegion;
-        cropRegion = null; // clear immediately — don't let it affect recording
-        takeScreenshot(region);
+      if (action==='record') {
+        startRecording(); // startRecording handles its own button state
       } else {
-        startRecording();
+        // Reset button back to normal state — frame mode is over
+        updateRecordBtn(false, false);
+        if (action==='screenshot') {
+          const region = cropRegion;
+          cropRegion = null; // clear immediately — don't let it affect recording
+          takeScreenshot(region);
+        }
       }
     }
     canvas.addEventListener('mousedown',onDown,{capture:true});
