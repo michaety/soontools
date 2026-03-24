@@ -98,7 +98,7 @@
 
   // Cleanup handles — collected and released on beforeunload
   const _cleanupAC         = new AbortController(); // aborts all document event listeners
-  let _streamWatchInterval = null;
+  let _streamWatchInterval = null; // legacy — now holds PerformanceObserver
   let _mapObserver         = null;
   let _floorGuard          = null;
 
@@ -473,6 +473,10 @@
   function watchForNativeMap() {
     if (!_altOverlay) injectAltOverlay();
 
+    // Track the image element we're currently observing so we can re-attach
+    // if React swaps it out for a new element.
+    let _observedImg = null;
+
     function updateOverlayVisibility() {
       if (!_altOverlay) { injectAltOverlay(); return; }
       const mapImg = document.querySelector('img[src*="map/s5/"]');
@@ -483,11 +487,58 @@
         _altOverlay = null;
         injectAltOverlay();
       }
+      // If the image element changed (React re-render), re-attach observer to new element
+      if (mapImg !== _observedImg) {
+        attachImgObserver(mapImg);
+      }
+    }
+
+    function attachImgObserver(img) {
+      if (_mapObserver) _mapObserver.disconnect();
+      _observedImg = img;
+      _mapObserver = new MutationObserver(updateOverlayVisibility);
+      // Watch the image itself for src changes (floor switch)
+      _mapObserver.observe(img, { attributes: true, attributeFilter: ['src'] });
+      // Also watch its parent for childList changes (React swapping the element)
+      if (img.parentElement) {
+        _mapObserver.observe(img.parentElement, { childList: true });
+      }
     }
 
     if (_mapObserver) _mapObserver.disconnect();
-    _mapObserver = new MutationObserver(updateOverlayVisibility);
-    _mapObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+
+    // Find the map image and attach observer directly to it.
+    // Falls back to a lightweight poll if the map isn't in the DOM yet.
+    const mapImg = document.querySelector('img[src*="map/s5/"]');
+    if (mapImg) {
+      attachImgObserver(mapImg);
+    } else {
+      let _mapPollAttempts = 0;
+      const _mapPoll = setInterval(() => {
+        _mapPollAttempts++;
+        const img = document.querySelector('img[src*="map/s5/"]');
+        if (img) {
+          clearInterval(_mapPoll);
+          attachImgObserver(img);
+        } else if (_mapPollAttempts >= 30) {
+          clearInterval(_mapPoll);
+        }
+      }, 500);
+    }
+
+    // Also intercept Upstairs/Downstairs button clicks directly — the most
+    // reliable trigger since the user clicking the button is what causes the
+    // floor switch. MutationObserver is the backup for programmatic changes.
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest?.('button');
+      if (!btn) return;
+      const text = btn.textContent?.trim();
+      if (text === 'Upstairs' || text === 'Downstairs') {
+        // Defer slightly — the src change happens after the click handler
+        setTimeout(updateOverlayVisibility, 100);
+      }
+    }, { capture: true, signal: _cleanupAC.signal });
+
     [500, 1500, 3000].forEach(ms => setTimeout(updateOverlayVisibility, ms));
   }
 
@@ -504,15 +555,19 @@
     }
     HTMLAudioElement.prototype.__soonPatched__ = true;
 
-    // Track whether we're in a hover event — only mute sounds triggered by hover
+    // Track whether we're in a hover event — only mute sounds triggered by hover.
+    // Uses a single pointermove listener instead of 5 separate mouse listeners.
+    // Pointer events fire less frequently than mouseover/mouseenter on complex DOMs.
     let _inHover = false;
+    let _hoverTimer = null;
     const sig = { capture: true, signal: _cleanupAC.signal };
-    document.addEventListener('mouseenter', () => { _inHover = true; }, sig);
-    document.addEventListener('mouseover',  () => { _inHover = true; }, sig);
-    document.addEventListener('mouseleave', () => { _inHover = false; }, sig);
-    document.addEventListener('mouseout',   () => { _inHover = false; }, sig);
+    document.addEventListener('pointermove', () => {
+      _inHover = true;
+      clearTimeout(_hoverTimer);
+      _hoverTimer = setTimeout(() => { _inHover = false; }, 150);
+    }, sig);
     // Click resets hover flag so click sounds play
-    document.addEventListener('click',      () => { _inHover = false; }, sig);
+    document.addEventListener('click', () => { _inHover = false; }, sig);
 
     const _origPlay = HTMLAudioElement.prototype.play;
     HTMLAudioElement.prototype.play = function() {
@@ -546,13 +601,15 @@
   }
 
   function watchStreamChanges() {
-    if (_streamWatchInterval) clearInterval(_streamWatchInterval);
-    _streamWatchInterval = setInterval(() => {
-      try {
-        const entries = (unsafeWindow || window).performance.getEntriesByType('resource');
-        const recent = entries.slice(-50);
-        for (let i = recent.length - 1; i >= 0; i--) {
-          const url = recent[i].name;
+    // Event-driven: PerformanceObserver fires only when new resources load,
+    // replacing the 1-second setInterval that polled the entire resource timing buffer.
+    // Zero CPU cost when no new stream segments arrive.
+    if (_streamWatchInterval) { _streamWatchInterval.disconnect(); _streamWatchInterval = null; }
+    try {
+      const observer = new PerformanceObserver((list) => {
+        const entries = list.getEntries();
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const url = entries[i].name;
           if (!url.includes('streams-') || !url.includes('.fishtank.live')) continue;
           const m = url.match(/live\+([a-z0-9]+-\d+)/);
           if (!m) continue;
@@ -565,8 +622,34 @@
           }
           break;
         }
-      } catch(e) {}
-    }, 1000);
+      });
+      observer.observe({ type: 'resource', buffered: false });
+      _streamWatchInterval = observer; // stored for cleanup
+    } catch(e) {
+      // Fallback for browsers that don't support PerformanceObserver (unlikely)
+      console.warn('[SOON] PerformanceObserver unavailable, falling back to polling');
+      const interval = setInterval(() => {
+        try {
+          const entries = (unsafeWindow || window).performance.getEntriesByType('resource');
+          const recent = entries.slice(-50);
+          for (let i = recent.length - 1; i >= 0; i--) {
+            const url = recent[i].name;
+            if (!url.includes('streams-') || !url.includes('.fishtank.live')) continue;
+            const m = url.match(/live\+([a-z0-9]+-\d+)/);
+            if (!m) continue;
+            const slug = m[1];
+            if (slug === _lastDetectedSlug) break;
+            _lastDetectedSlug = slug;
+            const room = ROOMS.find(r => r.slug === slug);
+            if (room && room.id !== _activeRoomId) {
+              onRoomSelected(room.id);
+            }
+            break;
+          }
+        } catch(e) {}
+      }, 1000);
+      _streamWatchInterval = { disconnect() { clearInterval(interval); } };
+    }
   }
 
   function watchTabClicks() {
@@ -596,7 +679,7 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   function cleanup() {
-    if (_streamWatchInterval) { clearInterval(_streamWatchInterval); _streamWatchInterval = null; }
+    if (_streamWatchInterval) { _streamWatchInterval.disconnect();   _streamWatchInterval = null; }
     if (_mapObserver)         { _mapObserver.disconnect();           _mapObserver = null; }
     if (_floorGuard)          { _floorGuard.disconnect();            _floorGuard = null; }
     _cleanupAC.abort(); // removes all document event listeners registered with _cleanupAC.signal

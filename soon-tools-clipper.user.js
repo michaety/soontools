@@ -42,7 +42,9 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   function getVideoEl() {
-    if (mainVideoEl && document.contains(mainVideoEl) &&
+    // Fast path: cached element is still valid — avoids querySelectorAll + getBoundingClientRect
+    // Use .isConnected instead of document.contains() (cheaper, no tree walk)
+    if (mainVideoEl && mainVideoEl.isConnected &&
         mainVideoEl.id !== 'sc-hidden-vid' &&
         !mainVideoEl.paused && mainVideoEl.readyState >= 2) {
       return mainVideoEl;
@@ -89,7 +91,7 @@
     let lastOverlayDraw=0;
     function updateCanvas(ts) {
       if (!document.getElementById('sc-crop-canvas')) return;
-      if(ts-lastOverlayDraw<33){requestAnimationFrame(updateCanvas);return;} // ~30fps
+      if(document.hidden||ts-lastOverlayDraw<33){requestAnimationFrame(updateCanvas);return;} // ~30fps, skip when tab backgrounded
       lastOverlayDraw=ts;
       const r = getVidRect();
       canvas.style.left = r.left+'px'; canvas.style.top = r.top+'px';
@@ -417,7 +419,7 @@
 
     _drawFrame(ts) {
       if (!this.isActive) return; // session ended — rAF loop stops here
-      if (ts - this._lastDrawTs < 41.67) { // ~24fps
+      if (document.hidden || ts - this._lastDrawTs < 41.67) { // ~24fps, skip entirely when tab backgrounded
         this._rafId = requestAnimationFrame(ts => this._drawFrame(ts));
         return;
       }
@@ -552,8 +554,8 @@
       filename:'soontools_'+clipId+'.webm',mimeType,processing:true};
 
     clips.unshift(clip);
-    // Cap at 10 clips — revoke oldest blob URLs to free memory
-    while(clips.length>10){
+    // Cap at 5 clips — revoke oldest blob URLs to free memory (clips can be 10-50MB each)
+    while(clips.length>5){
       const old=clips.pop();
       if(old.blobUrl){URL.revokeObjectURL(old.blobUrl);old.blobUrl=null;}
       if(old.thumbUrl){URL.revokeObjectURL(old.thumbUrl);old.thumbUrl=null;}
@@ -647,7 +649,7 @@
     let lastCropDraw=0;
     function draw(ts) {
       if(!recording){canvas.remove();return;}
-      if(ts-lastCropDraw<33){requestAnimationFrame(draw);return;} // ~30fps
+      if(document.hidden||ts-lastCropDraw<33){requestAnimationFrame(draw);return;} // ~30fps, skip when tab backgrounded
       lastCropDraw=ts;
       const el=vid.getBoundingClientRect();
       const vw=vid.videoWidth||1920, vh=vid.videoHeight||1080;
