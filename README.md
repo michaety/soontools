@@ -38,7 +38,7 @@ Installation
 - Keyboard Shortcuts
 - Download as MP4
 
-[![Install](https://img.shields.io/badge/Install%20Now-v1.5.4-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js)
+[![Install](https://img.shields.io/badge/Install%20Now-v1.5.7-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js)
 
 ---
 
