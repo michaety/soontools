@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Map
 // @namespace    https://fishtank.news
-// @version      3.2.9
+// @version      3.3.0
 // @description  Enhances Fishtank's native map — click any room to switch cam, syncs with stream. By fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -80,6 +80,7 @@
   // Alt cameras are accessed by clicking zone polygons on the parent stream's video overlay.
   // The zones API tells us which polygon to click. We fetch zone data at startup and cache it.
   const ALT_CAMERAS = {
+    'BPTZ': { parentId: 'BAR',    parentSlug: 'brrr-5', altSlug: 'brpz-5' },
     'BALT': { parentId: 'BAR',    parentSlug: 'brrr-5', altSlug: 'brrr2-5' },
     'DALT': { parentId: 'DORM',   parentSlug: 'dmrm-5', altSlug: 'dmrm2-5' },
     'MALT': { parentId: 'MARKET', parentSlug: 'mrke-5', altSlug: 'mrke2-5' },
