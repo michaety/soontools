@@ -62,15 +62,9 @@ Navigate the house using an interactive architectural floorplan overlay. Click a
 
 Click the install buttons above — Tampermonkey will open a confirmation dialog.
 
-Click the install button above — Tampermonkey will open a confirmation dialog.
-
 ### 3. Use it
 
 Navigate to [fishtank.live](https://www.fishtank.live) — Soon Tools appears automatically in the left panel.
-
----
-
-The floorplan `.drawio` files are included if you want to update the map layout when Fishtank changes the house.
 
 ---
 
