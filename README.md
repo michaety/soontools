@@ -7,8 +7,7 @@ Soon Tools is split into two independent scripts. Install one or both.
 ---
 
 ## 🎬 Soon Clipper
-Snipping tool–style video recorder for Fishtank Live. Record fullscreen or cropped selections, trim, and export to MP4 or WebM.
-Installation
+Snipping tool–style video recorder for Fishtank Live. Record fullscreen or cropped selections, trim, and export to MP4.
 
 <img width="362" height="428" alt="image" src="https://github.com/user-attachments/assets/79b12b91-a6c1-4dc3-9ae1-318de7770335" />
 
