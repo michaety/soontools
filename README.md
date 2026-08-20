@@ -1,6 +1,6 @@
 # Soon Tools 🐟
 
-> Tampermonkey userscripts for [fishtank.live](https://www.fishtank.live) — built by [fishtank.news](https://fishtank.news)
+> Tampermonkey userscripts for [fishtank.live](https://www.fishtank.live) — built by [soon](https://x.com/emty_h3v) @ [fishtank.news](https://fishtank.news)
 
 Soon Tools is split into two independent scripts. Install one or both.
 
