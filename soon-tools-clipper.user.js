@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.9
+// @version      1.5.10
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1042,14 +1042,14 @@
       inner.innerHTML='<div id="sc-status-row" class="sc-sublabel" style="min-height:13px;"></div><div id="sc-clips-list"></div>';
       body.appendChild(inner); root.appendChild(hdr); root.appendChild(body);
 
-      // Insert a zero-height placeholder at the desired DOM position.
-      // The placeholder is a proper flex child so its BoundingClientRect is always
-      // accurate — we use it as a stable anchor to position root as a fixed overlay.
+      // Insert a placeholder at the desired DOM position.
+      // The placeholder acts as both a position anchor (fixed overlay reads its rect)
+      // and a space reservation (its height mirrors the widget height so chat content
+      // is pushed down rather than hidden behind the fixed overlay).
       function attachFixed(el, anchorParent, anchorSibling) {
-        // anchorSibling: insert placeholder before this element (or append if null)
         const placeholder = document.createElement('div');
         placeholder.id = 'sc-placeholder';
-        placeholder.style.cssText = 'height:0;padding:0;margin:0;border:none;flex-shrink:0;pointer-events:none;';
+        placeholder.style.cssText = 'padding:0;margin:0;border:none;flex-shrink:0;pointer-events:none;';
         if(anchorSibling) anchorSibling.insertAdjacentElement('beforebegin', placeholder);
         else anchorParent.appendChild(placeholder);
 
@@ -1057,8 +1057,10 @@
 
         function repin() {
           const pr = placeholder.getBoundingClientRect();
-          console.log('[SOON CLIP] repin', pr.top, pr.left, pr.width);
           if(!pr.width) return;
+          // Sync placeholder height to widget height — reserves layout space
+          const wh = el.offsetHeight;
+          if(Math.abs(placeholder.offsetHeight - wh) > 1) placeholder.style.height = wh + 'px';
           el.style.position = 'fixed';
           el.style.top    = pr.top  + 'px';
           el.style.left   = pr.left + 'px';
@@ -1068,8 +1070,10 @@
         repin();
         requestAnimationFrame(repin);
         if(el._pinRO) el._pinRO.disconnect();
+        // Watch both: placeholder (position/width) and el (height — collapse/expand/clips)
         const ro = new ResizeObserver(repin);
         ro.observe(placeholder);
+        ro.observe(el);
         el._pinRO = ro;
         el._placeholder = placeholder;
       }
