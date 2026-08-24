@@ -1044,59 +1044,67 @@
 
       // Convert root to position:fixed so it doesn't participate in the sidebar's
       // flex layout and push the bottom buttons (TTS/SFX/TOY/GIFT) off screen.
-      function pinFixed(el) {
+      // Reads the container's rect (reliable), moves root to body, then pins.
+      function pinFixed(el, container) {
         requestAnimationFrame(()=>{
-          const container = el.parentElement;
-          if(!container) return;
           const cr = container.getBoundingClientRect();
-          const er = el.getBoundingClientRect();
+          document.body.appendChild(el); // out of sidebar flow
           el.style.position = 'fixed';
-          el.style.top  = er.top  + 'px';
-          el.style.left = cr.left + 'px';
-          el.style.width= cr.width+ 'px';
+          el.style.top    = cr.top    + 'px';
+          el.style.left   = cr.left   + 'px';
+          el.style.width  = cr.width  + 'px';
           el.style.zIndex = '9998';
-          // Keep width/left in sync when the sidebar resizes (e.g. window resize)
+          // Repin whenever the sidebar resizes or moves (e.g. window resize)
           if(el._pinRO) el._pinRO.disconnect();
           const ro = new ResizeObserver(()=>{
             const cr2 = container.getBoundingClientRect();
+            el.style.top   = cr2.top   + 'px';
             el.style.left  = cr2.left  + 'px';
             el.style.width = cr2.width + 'px';
           });
           ro.observe(container);
           el._pinRO = ro;
+          el._pinContainer = container;
         });
       }
 
       function initPosition(cb,attempts=0){
         const ftfpMap=document.getElementById('ftfp-map');
         const chatInput=document.getElementById('chat-input');
-        if(ftfpMap){ftfpMap.insertAdjacentElement('afterend',root);pinFixed(root);cb();startRejectionWatcher();return;}
+        if(ftfpMap){
+          const container=ftfpMap.parentElement;
+          ftfpMap.insertAdjacentElement('afterend',root);
+          if(container) pinFixed(root,container);
+          cb();startRejectionWatcher(container);return;
+        }
         if(chatInput){
           const insertBefore=chatInput.parentElement?.parentElement?.parentElement;
-          if(insertBefore?.parentElement){
+          const container=insertBefore?.parentElement;
+          if(container){
             insertBefore.insertAdjacentElement('beforebegin',root);
-            pinFixed(root); cb(); startRejectionWatcher(); return;
+            pinFixed(root,container); cb(); startRejectionWatcher(container); return;
           }
         }
         if(attempts<33) setTimeout(()=>initPosition(cb,attempts+1),300);
-        else { document.body.appendChild(root); cb(); startRejectionWatcher(); } // fallback
+        else { document.body.appendChild(root); cb(); startRejectionWatcher(document.body); } // fallback
       }
 
-      // Watch for React wiping our root out of the DOM and re-inject cleanly
-      function startRejectionWatcher() {
+      // Watch for React wiping the sidebar container out of the DOM and re-inject.
+      // Root lives on document.body after pinFixed, so we watch the sidebar instead.
+      function startRejectionWatcher(container) {
+        const watchTarget = container || document.body;
         const obs=new MutationObserver(()=>{
-          if(!document.contains(root)){
+          // Re-inject if the sidebar container itself was removed by React
+          if(!document.contains(watchTarget)){
             obs.disconnect();
             if(reinjecting)return;
             reinjecting=true;
-            // Debounce — wait for React to finish hydrating before re-injecting
+            root._pinRO?.disconnect();
+            root.remove();
             setTimeout(()=>{ reinjecting=false; inject(); }, 1000);
           }
         });
-        // Watch only direct children of body — avoids firing on every React
-        // sub-tree mutation. Our root is always a direct child of its container.
-        const watchTarget = root.parentElement || document.body;
-        obs.observe(watchTarget,{childList:true});
+        obs.observe(watchTarget.parentElement||document.body,{childList:true});
       }
 
       initPosition(()=>{
