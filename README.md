@@ -23,26 +23,13 @@ Snipping tool–style video recorder for Fishtank Live. Record fullscreen or cro
 - Keyboard Shortcuts
 - Download as MP4
 
-[![Install](https://img.shields.io/badge/Install%20Now-v1.5.7-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js)
+[![Install](https://img.shields.io/badge/Install%20Now-v1.5.8-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js)
 
 ---
 
-## 🗺️ Soon Map
+## 🗺️ Soon Map *(discontinued)*
 
-Navigate the house using an interactive architectural floorplan overlay. Click any room to switch cameras instantly — no hunting through the tab bar.
-
-<img width="362" height="200" alt="image" src="https://github.com/user-attachments/assets/1013aa5c-6c06-4197-b90b-61b2620dfe5b" />
-
-
-**Features:**
-- Clickable floorplan for downstairs and upstairs
-- Staircase zones toggle between floors
-- Includes alt cams
-- Director Mode button
-- Inherits fishtank.live's theme — looks native
-- Toggle between Map and Tabs view at any time
-
-[![Install Map](https://img.shields.io/badge/Install%20Map-v3.3.0-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-map.user.js)
+Soon Map has been deprecated and is no longer maintained. If you have it installed, it will prompt you to uninstall.
 
 ---
 
