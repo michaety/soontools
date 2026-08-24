@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.8
+// @version      1.5.9
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1042,47 +1042,57 @@
       inner.innerHTML='<div id="sc-status-row" class="sc-sublabel" style="min-height:13px;"></div><div id="sc-clips-list"></div>';
       body.appendChild(inner); root.appendChild(hdr); root.appendChild(body);
 
-      // Attach root to document.body as a fixed overlay aligned to the sidebar.
-      // Never inserted into the sidebar flow — avoids pushing bottom buttons off screen.
-      function attachFixed(el, container) {
+      // Insert a zero-height placeholder at the desired DOM position.
+      // The placeholder is a proper flex child so its BoundingClientRect is always
+      // accurate — we use it as a stable anchor to position root as a fixed overlay.
+      function attachFixed(el, anchorParent, anchorSibling) {
+        // anchorSibling: insert placeholder before this element (or append if null)
+        const placeholder = document.createElement('div');
+        placeholder.id = 'sc-placeholder';
+        placeholder.style.cssText = 'height:0;padding:0;margin:0;border:none;flex-shrink:0;pointer-events:none;';
+        if(anchorSibling) anchorSibling.insertAdjacentElement('beforebegin', placeholder);
+        else anchorParent.appendChild(placeholder);
+
         document.body.appendChild(el);
+
         function repin() {
-          const cr = container.getBoundingClientRect();
-          if(!cr.width) return; // container not yet sized — ResizeObserver will retry
+          const pr = placeholder.getBoundingClientRect();
+          console.log('[SOON CLIP] repin', pr.top, pr.left, pr.width);
+          if(!pr.width) return;
           el.style.position = 'fixed';
-          el.style.top    = cr.top    + 'px';
-          el.style.left   = cr.left   + 'px';
-          el.style.width  = cr.width  + 'px';
+          el.style.top    = pr.top  + 'px';
+          el.style.left   = pr.left + 'px';
+          el.style.width  = pr.width + 'px';
           el.style.zIndex = '9998';
         }
         repin();
-        requestAnimationFrame(repin); // second pass in case layout wasn't ready yet
+        requestAnimationFrame(repin);
         if(el._pinRO) el._pinRO.disconnect();
         const ro = new ResizeObserver(repin);
-        ro.observe(container);
+        ro.observe(placeholder);
         el._pinRO = ro;
-        el._pinContainer = container;
+        el._placeholder = placeholder;
       }
 
       function initPosition(cb,attempts=0){
         const ftfpMap=document.getElementById('ftfp-map');
         const chatInput=document.getElementById('chat-input');
         if(ftfpMap && ftfpMap.parentElement){
-          attachFixed(root, ftfpMap.parentElement);
+          attachFixed(root, ftfpMap.parentElement, ftfpMap.nextElementSibling);
           cb(); startRejectionWatcher(ftfpMap.parentElement); return;
         }
         if(chatInput){
           const insertBefore=chatInput.parentElement?.parentElement?.parentElement;
-          const container=insertBefore?.parentElement;
-          if(container){
-            attachFixed(root, container); cb(); startRejectionWatcher(container); return;
+          if(insertBefore?.parentElement){
+            attachFixed(root, insertBefore.parentElement, insertBefore);
+            cb(); startRejectionWatcher(insertBefore.parentElement); return;
           }
         }
         if(attempts<33) setTimeout(()=>initPosition(cb,attempts+1),300);
         else { document.body.appendChild(root); cb(); startRejectionWatcher(document.body); } // fallback
       }
 
-      // Watch for React removing the sidebar container and re-inject when it does.
+      // Watch for React removing the sidebar and re-inject when it does.
       // Root lives on document.body, so we watch the sidebar container instead.
       function startRejectionWatcher(container) {
         const watchTarget = container.parentElement || document.body;
@@ -1092,6 +1102,7 @@
             if(reinjecting)return;
             reinjecting=true;
             root._pinRO?.disconnect();
+            root._placeholder?.remove();
             root.remove();
             setTimeout(()=>{ reinjecting=false; inject(); }, 1000);
           }
