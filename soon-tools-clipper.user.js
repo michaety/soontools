@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.7
+// @version      1.5.8
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1042,15 +1042,40 @@
       inner.innerHTML='<div id="sc-status-row" class="sc-sublabel" style="min-height:13px;"></div><div id="sc-clips-list"></div>';
       body.appendChild(inner); root.appendChild(hdr); root.appendChild(body);
 
+      // Convert root to position:fixed so it doesn't participate in the sidebar's
+      // flex layout and push the bottom buttons (TTS/SFX/TOY/GIFT) off screen.
+      function pinFixed(el) {
+        requestAnimationFrame(()=>{
+          const container = el.parentElement;
+          if(!container) return;
+          const cr = container.getBoundingClientRect();
+          const er = el.getBoundingClientRect();
+          el.style.position = 'fixed';
+          el.style.top  = er.top  + 'px';
+          el.style.left = cr.left + 'px';
+          el.style.width= cr.width+ 'px';
+          el.style.zIndex = '9998';
+          // Keep width/left in sync when the sidebar resizes (e.g. window resize)
+          if(el._pinRO) el._pinRO.disconnect();
+          const ro = new ResizeObserver(()=>{
+            const cr2 = container.getBoundingClientRect();
+            el.style.left  = cr2.left  + 'px';
+            el.style.width = cr2.width + 'px';
+          });
+          ro.observe(container);
+          el._pinRO = ro;
+        });
+      }
+
       function initPosition(cb,attempts=0){
         const ftfpMap=document.getElementById('ftfp-map');
         const chatInput=document.getElementById('chat-input');
-        if(ftfpMap){ftfpMap.insertAdjacentElement('afterend',root);cb();startRejectionWatcher();return;}
+        if(ftfpMap){ftfpMap.insertAdjacentElement('afterend',root);pinFixed(root);cb();startRejectionWatcher();return;}
         if(chatInput){
           const insertBefore=chatInput.parentElement?.parentElement?.parentElement;
           if(insertBefore?.parentElement){
             insertBefore.insertAdjacentElement('beforebegin',root);
-            cb(); startRejectionWatcher(); return;
+            pinFixed(root); cb(); startRejectionWatcher(); return;
           }
         }
         if(attempts<33) setTimeout(()=>initPosition(cb,attempts+1),300);
@@ -1439,7 +1464,7 @@
       @keyframes sc-pulse { 0%,100%{opacity:1} 50%{opacity:0.65} }
       .sc-ph-spinner { width:18px;height:18px;border:2px solid rgba(0,0,0,0.12);border-top-color:var(--base-primary,#df4e1e);border-radius:50%;animation:sc-spin 0.8s linear infinite;flex-shrink:0; }
 
-      #sc-root { font-family:var(--base-font-primary,sofia-pro-variable,sans-serif);flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.2); }
+      #sc-root { font-family:var(--base-font-primary,sofia-pro-variable,sans-serif);box-shadow:0 2px 8px rgba(0,0,0,0.2); }
       .sc-hdr { display:flex;align-items:center;padding:0 3px 1px;gap:5px;background:var(--base-light,#dddec4);background-image:var(--base-texture-background);border-bottom:1px solid rgba(0,0,0,0.15);box-shadow:rgba(255,255,255,0.5) 0 1px 0;user-select:none; }
       .sc-hdr-icon { color:var(--base-primary,#df4e1e);font-size:11px; }
       .sc-hdr-title { font-size:14px;font-weight:700;color:rgb(25,28,32); }
