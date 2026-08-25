@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.23
+// @version      1.5.24
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1033,21 +1033,23 @@
       const root=document.createElement('div'); root.id='sc-root';
 
       const hdr=document.createElement('div'); hdr.className='sc-hdr';
+      const NATIVE_DARK_BTN='bg-gradient-to-r from-dark-400/75 to-dark-500/75 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
+      const NATIVE_TERTIARY_BTN='bg-gradient-to-r from-tertiary-500 to-tertiary-600/75 active:to-tertiary-700/90 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
+      const NATIVE_PRIMARY_BTN='bg-gradient-to-r from-primary-400 to-primary-500/90 active:to-primary-600/75 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
       hdr.innerHTML=`
-        <span class="sc-hdr-icon">⏺</span>
         <span class="sc-hdr-title">Clip</span>
         <span id="sc-rec-indicator" class="sc-rec-indicator" style="display:none;"></span>
         <div style="margin-left:auto;display:flex;gap:4px;align-items:center;">
           <div class="sc-btn-group">
-            <button id="sc-ss-full" class="sc-icon-btn" title="Screenshot">📷</button>
-            <button id="sc-ss-crop" class="sc-icon-btn" title="Crop screenshot">✂📷</button>
+            <button id="sc-ss-full" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Screenshot">📷</button>
+            <button id="sc-ss-crop" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Crop screenshot">✂📷</button>
           </div>
           <div class="sc-btn-group" id="sc-rec-group">
-            <button id="sc-rec-full" class="sc-rec-btn" title="Record fullscreen">⏺</button>
-            <button id="sc-rec-crop" class="sc-rec-btn sc-rec-btn--crop" title="Record selection">✂</button>
+            <button id="sc-rec-full" class="sc-rec-btn ${NATIVE_TERTIARY_BTN}" title="Record fullscreen">⏺</button>
+            <button id="sc-rec-crop" class="sc-rec-btn sc-rec-btn--crop ${NATIVE_TERTIARY_BTN}" title="Record selection">✂</button>
           </div>
-          <button id="sc-settings-btn" class="sc-icon-btn" title="Settings">⚙</button>
-          <button id="sc-toggle" class="sc-toggle-collapse" title="Collapse"></button>
+          <button id="sc-settings-btn" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Settings">⚙</button>
+          <button id="sc-toggle" class="sc-toggle-collapse ${NATIVE_PRIMARY_BTN}" title="Collapse"></button>
         </div>`;
 
       const stalePanel = document.getElementById('sc-settings');
@@ -1499,52 +1501,29 @@
         border-bottom:3px solid color-mix(in srgb,var(--base-light,#dddec4) 60%,black);
         border-right:2px solid color-mix(in srgb,var(--base-light,#dddec4) 60%,black);
       }
-      #sc-root.sc-placement-chat { box-shadow:none; }
+      #sc-root.sc-placement-chat {
+        box-shadow:none;
+        border-bottom-color:color-mix(in srgb,var(--base-light,#dddec4) 80%,white);
+        border-right-color:color-mix(in srgb,var(--base-light,#dddec4) 80%,white);
+      }
       .sc-hdr { display:flex;align-items:center;padding:4px;gap:5px;min-height:41px;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,0.15);box-shadow:rgba(255,255,255,0.5) 0 1px 0;user-select:none; }
-      .sc-hdr-icon { color:var(--base-primary,#df4e1e);font-size:11px; }
       .sc-hdr-title { font-family:var(--base-font-primary,sofia-pro-variable,sans-serif);font-size:14px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;line-height:1.5;color:var(--base-dark-text,rgb(25,28,32)); }
       .sc-rec-indicator { font-size:10px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;color:var(--base-primary,#df4e1e);letter-spacing:0.05em; }
 
+      /* Chrome (background/size/radius/hover) for these buttons comes from the native
+         Tailwind utility classes applied alongside these — copied verbatim off the
+         site's own icon-row, record-shop, and collapse buttons. Only the leftovers
+         those classes don't cover live here. */
       .sc-btn-group { display:flex;gap:2px; }
-      .sc-icon-btn {
-        width:24px;height:24px;box-sizing:border-box;padding:2px;
-        display:inline-flex;align-items:center;justify-content:center;
-        font-size:12px;line-height:1;
-        background:linear-gradient(to right,var(--base-dark-400,#191c20),var(--base-dark-500,#191c20));
-        color:var(--base-light-text,#fff);
-        border:none;border-radius:var(--radius-md,6px);
-        cursor:pointer;transition:filter 0.1s;
-      }
-      .sc-icon-btn:hover { filter:brightness(1.05); }
-      .sc-icon-btn:active { filter:brightness(0.95); }
-      .sc-rec-btn {
-        width:24px;height:24px;box-sizing:border-box;padding:2px;
-        display:inline-flex;align-items:center;justify-content:center;
-        font-family:var(--base-font-primary,sofia-pro-variable,sans-serif);font-size:11px;
-        background:linear-gradient(to right,var(--base-danger-500,#c92a2a),var(--base-danger-600,#c92a2a));
-        color:var(--base-light-text,#fff);
-        border:none;border-radius:var(--radius-md,6px);
-        cursor:pointer;transition:filter 0.1s;
-      }
-      .sc-rec-btn:hover { filter:brightness(1.05); }
-      .sc-rec-btn:active { filter:brightness(0.95); }
+      .sc-icon-btn { font-size:12px;line-height:1; }
+      .sc-rec-btn { font-family:var(--base-font-primary,sofia-pro-variable,sans-serif);font-size:11px; }
       .sc-rec-btn--crop { opacity:0.75; }
       .sc-rec-btn--stop { animation:sc-pulse 1.1s infinite; }
-      .sc-rec-btn--cancel { background:linear-gradient(to right,var(--base-dark-400,#191c20),var(--base-dark-500,#191c20));opacity:0.75; }
+      .sc-rec-btn--cancel { filter:grayscale(1);opacity:0.75; }
 
-      .sc-toggle-collapse {
-        position:relative;
-        width:24px;height:24px;box-sizing:border-box;padding:2px;
-        display:inline-flex;align-items:center;justify-content:center;
-        background:linear-gradient(to right,var(--base-primary-400,#df4e1e),var(--base-primary-500,#df4e1e));
-        color:var(--base-light-text,#fff);
-        border:none;border-radius:var(--radius-md,6px);
-        cursor:pointer;transition:filter 0.1s;
-      }
+      .sc-toggle-collapse { position:relative; }
       .sc-toggle-collapse::before { content:'';display:block;width:10px;height:2px;border-radius:1px;background:currentColor; }
       .sc-toggle-collapse.sc-collapsed::after { content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:2px;height:10px;border-radius:1px;background:currentColor; }
-      .sc-toggle-collapse:hover { filter:brightness(1.05); }
-      .sc-toggle-collapse:active { filter:brightness(0.95); }
 
       #sc-settings { position:fixed;background:var(--base-light,#dddec4);background-image:var(--base-texture-panel,var(--base-texture-background));border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-lg,8px);box-shadow:0 4px 16px rgba(0,0,0,0.2);z-index:2147483640;padding:10px;min-width:230px; }
       .sc-toggle-btn { font-family:var(--base-font-primary,sofia-pro-variable,sans-serif);font-size:10px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;padding:2px 8px;background:rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-md,6px);cursor:pointer;min-width:40px;text-align:center;transition:background 0.1s,color 0.1s; }
