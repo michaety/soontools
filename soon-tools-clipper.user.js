@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.12
+// @version      1.5.13
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -963,6 +963,26 @@
     mcBtn.addEventListener('click',e=>{e.stopPropagation();localStorage.setItem('sc_multicam',mcOn()?'0':'1');mcUpdate();});
     mcRow.appendChild(mcLbl); mcRow.appendChild(mcBtn); panel.appendChild(mcRow);
 
+    // Placement toggle — left panel vs chat sidebar
+    const plRow=document.createElement('div'); plRow.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;';
+    const plLbl=document.createElement('div');
+    plLbl.innerHTML='<span style="font-size:10px;color:rgba(0,0,0,0.65);">Position in chat</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">Move Clip to the chat sidebar</div>';
+    const plBtn=document.createElement('button'); plBtn.className='sc-toggle-btn';
+    const plOn=()=>localStorage.getItem('sc_placement')==='chat';
+    const plUpdate=()=>{plBtn.textContent=plOn()?'ON':'OFF';plBtn.classList.toggle('sc-toggle-btn--on',plOn());};
+    plUpdate();
+    plBtn.addEventListener('click',e=>{
+      e.stopPropagation();
+      localStorage.setItem('sc_placement',plOn()?'left':'chat');
+      plUpdate();
+      // Re-inject at new position
+      root._pinRO?.disconnect();
+      if(root._messagesEl) root._messagesEl.style.paddingTop='';
+      root.remove();
+      inject();
+    });
+    plRow.appendChild(plLbl); plRow.appendChild(plBtn); panel.appendChild(plRow);
+
     const sep=document.createElement('div'); sep.style.cssText='border-top:1px solid rgba(0,0,0,0.1);margin:8px 0 6px;'; panel.appendChild(sep);
     const kbTitle=document.createElement('div'); kbTitle.style.cssText='font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.4;margin-bottom:6px;'; kbTitle.textContent='Keyboard Shortcuts'; panel.appendChild(kbTitle);
 
@@ -1099,13 +1119,13 @@
       }
 
       function initPosition(cb,attempts=0){
-        // Prefer the left game-panel column — no layout fights with chat
-        const leftPanel=findLeftPanel();
+        // Prefer the left game-panel column unless user has opted into chat placement
+        const leftPanel=localStorage.getItem('sc_placement')!=='chat' && findLeftPanel();
         if(leftPanel){
           leftPanel.insertAdjacentElement('afterbegin',root);
           cb(); startRejectionWatcher(leftPanel,true); return;
         }
-        // Fallback: chat sidebar with fixed overlay + messages padding-top
+        // Chat sidebar: fixed overlay + messages padding-top
         const chatInput=document.getElementById('chat-input');
         if(chatInput){
           const insertBefore=chatInput.parentElement?.parentElement?.parentElement;
