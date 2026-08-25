@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.17
+// @version      1.5.18
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1061,17 +1061,17 @@
       body.appendChild(inner); root.appendChild(hdr); root.appendChild(body);
 
       // Find the left game-panel column (Events / Missions / Inventory stack).
-      // Heuristic: a narrow (150–320px) element flush with the left viewport edge
+      // Heuristic: a narrow (150–320px) element near the left viewport edge
       // that has multiple children — the native ftfp-map parent is the canonical match.
       function findLeftPanel() {
         const ftfpMap=document.getElementById('ftfp-map');
         if(ftfpMap?.parentElement) return ftfpMap.parentElement;
-        // Walk 2 levels deep from body — the left column is always near the top of the tree
-        for(const child of document.body.children){
-          for(const el of [child,...child.children]){
-            const r=el.getBoundingClientRect();
-            if(r.left<=10 && r.width>=150 && r.width<=320 && r.height>=200 && el.children.length>=2) return el;
-          }
+        // Scan the whole tree (document order = ancestors before descendants,
+        // so the first match is the outer column, not a card inside it) —
+        // the column isn't always a fixed depth from body.
+        for(const el of document.querySelectorAll('div')){
+          const r=el.getBoundingClientRect();
+          if(r.left>=0 && r.left<=40 && r.width>=150 && r.width<=320 && r.height>=200 && el.children.length>=2 && el.children.length<=8) return el;
         }
         return null;
       }
