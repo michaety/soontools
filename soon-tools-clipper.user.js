@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.25
+// @version      1.5.26
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1024,6 +1024,21 @@
   // ── UI ─────────────────────────────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════════
 
+  // Native Tailwind chrome classes copied verbatim off the site's own buttons
+  // (icon-row, Missions-reset, Shop, and collapse buttons) — shared by inject()
+  // and updateRecordBtn() so button state changes don't fall back to plain CSS.
+  const NATIVE_DARK_BTN='bg-gradient-to-r from-dark-400/75 to-dark-500/75 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
+  const NATIVE_DANGER_BTN='bg-gradient-to-r from-danger-500 to-danger-600/75 active:to-danger-700/90 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
+  const NATIVE_PRIMARY_BTN='bg-gradient-to-r from-primary-400 to-primary-500/90 active:to-primary-600/75 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
+  const SC_ICON_ATTRS='viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  const SC_CORNERS='<path d="M4 9V6a2 2 0 0 1 2-2h3"/><path d="M15 4h3a2 2 0 0 1 2 2v3"/><path d="M20 15v3a2 2 0 0 1-2 2h-3"/><path d="M9 20H6a2 2 0 0 1-2-2v-3"/>';
+  const ICON_SCREENSHOT=`<svg ${SC_ICON_ATTRS}>${SC_CORNERS}</svg>`;
+  const ICON_CROP_SCREENSHOT=`<svg ${SC_ICON_ATTRS}>${SC_CORNERS}<rect x="4" y="4" width="16" height="16" rx="2" stroke-width="1.2" stroke-dasharray="2.5 2.5"/></svg>`;
+  const ICON_RECORD=`<svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="8" fill="currentColor"/></svg>`;
+  const ICON_CROP_RECORD=`<svg ${SC_ICON_ATTRS}>${SC_CORNERS}<circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/></svg>`;
+  const ICON_STOP=`<svg viewBox="0 0 24 24" width="14" height="14"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/></svg>`;
+  const ICON_SETTINGS=`<svg ${SC_ICON_ATTRS}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+
   function buildUI() {
     let reinjecting = false;
 
@@ -1033,22 +1048,19 @@
       const root=document.createElement('div'); root.id='sc-root';
 
       const hdr=document.createElement('div'); hdr.className='sc-hdr';
-      const NATIVE_DARK_BTN='bg-gradient-to-r from-dark-400/75 to-dark-500/75 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
-      const NATIVE_DANGER_BTN='bg-gradient-to-r from-danger-500 to-danger-600/75 active:to-danger-700/90 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
-      const NATIVE_PRIMARY_BTN='bg-gradient-to-r from-primary-400 to-primary-500/90 active:to-primary-600/75 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
       hdr.innerHTML=`
         <span class="sc-hdr-title">Clip</span>
         <span id="sc-rec-indicator" class="sc-rec-indicator" style="display:none;"></span>
         <div style="margin-left:auto;display:flex;gap:4px;align-items:center;">
           <div class="sc-btn-group">
-            <button id="sc-ss-full" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Screenshot">📷</button>
-            <button id="sc-ss-crop" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Crop screenshot">✂📷</button>
+            <button id="sc-ss-full" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Screenshot">${ICON_SCREENSHOT}</button>
+            <button id="sc-ss-crop" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Crop screenshot">${ICON_CROP_SCREENSHOT}</button>
           </div>
           <div class="sc-btn-group" id="sc-rec-group">
-            <button id="sc-rec-full" class="sc-rec-btn ${NATIVE_DANGER_BTN}" title="Record fullscreen">⏺</button>
-            <button id="sc-rec-crop" class="sc-rec-btn sc-rec-btn--crop ${NATIVE_DANGER_BTN}" title="Record selection">✂</button>
+            <button id="sc-rec-full" class="sc-rec-btn ${NATIVE_DANGER_BTN}" title="Record fullscreen">${ICON_RECORD}</button>
+            <button id="sc-rec-crop" class="sc-rec-btn sc-rec-btn--crop ${NATIVE_DANGER_BTN}" title="Record selection">${ICON_CROP_RECORD}</button>
           </div>
-          <button id="sc-settings-btn" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Settings">⚙</button>
+          <button id="sc-settings-btn" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Settings">${ICON_SETTINGS}</button>
           <button id="sc-toggle" class="sc-toggle-collapse ${NATIVE_PRIMARY_BTN}" title="Collapse"></button>
         </div>`;
 
@@ -1210,14 +1222,14 @@
   function updateRecordBtn(inFrameMode,isRecording){
     if(!UI.recFull)return;
     if(isRecording){
-      UI.recFull.textContent='⏹'; UI.recFull.className='sc-rec-btn sc-rec-btn--stop'; UI.recFull.title='Stop recording';
+      UI.recFull.innerHTML=ICON_STOP; UI.recFull.className=`sc-rec-btn sc-rec-btn--stop ${NATIVE_DANGER_BTN}`; UI.recFull.title='Stop recording';
       UI.recCrop.style.display='none';
     }else if(inFrameMode){
-      UI.recFull.textContent='✕ Cancel'; UI.recFull.className='sc-rec-btn sc-rec-btn--cancel sc-rec-btn--full';
+      UI.recFull.textContent='✕ Cancel'; UI.recFull.className=`sc-rec-btn sc-rec-btn--cancel sc-rec-btn--full ${NATIVE_DARK_BTN}`;
       UI.recCrop.style.display='none';
     }else{
-      UI.recFull.textContent='⏺'; UI.recFull.className='sc-rec-btn'; UI.recFull.title='Record fullscreen';
-      UI.recCrop.style.display=''; UI.recCrop.textContent='✂'; UI.recCrop.className='sc-rec-btn sc-rec-btn--crop'; UI.recCrop.title='Record selection';
+      UI.recFull.innerHTML=ICON_RECORD; UI.recFull.className=`sc-rec-btn ${NATIVE_DANGER_BTN}`; UI.recFull.title='Record fullscreen';
+      UI.recCrop.style.display=''; UI.recCrop.innerHTML=ICON_CROP_RECORD; UI.recCrop.className=`sc-rec-btn sc-rec-btn--crop ${NATIVE_DANGER_BTN}`; UI.recCrop.title='Record selection';
     }
   }
 
@@ -1519,7 +1531,8 @@
       .sc-rec-btn { font-family:var(--base-font-primary,sofia-pro-variable,sans-serif);font-size:11px; }
       .sc-rec-btn--crop { opacity:0.75; }
       .sc-rec-btn--stop { animation:sc-pulse 1.1s infinite; }
-      .sc-rec-btn--cancel { filter:grayscale(1);opacity:0.75; }
+      .sc-rec-btn--cancel { opacity:0.85; }
+      .sc-rec-btn--full { width:auto!important;padding-left:7px!important;padding-right:7px!important; }
 
       .sc-toggle-collapse { position:relative; }
       .sc-toggle-collapse::before { content:'';display:block;width:10px;height:2px;border-radius:1px;background:currentColor; }
