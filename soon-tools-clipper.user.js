@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.21
+// @version      1.5.22
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1047,7 +1047,7 @@
             <button id="sc-rec-crop" class="sc-rec-btn sc-rec-btn--crop" title="Record selection">✂</button>
           </div>
           <button id="sc-settings-btn" class="sc-icon-btn" title="Settings">⚙</button>
-          <button id="sc-toggle" class="sc-toggle-collapse">−</button>
+          <button id="sc-toggle" class="sc-toggle-collapse" title="Collapse"></button>
         </div>`;
 
       const stalePanel = document.getElementById('sc-settings');
@@ -1078,18 +1078,23 @@
 
       function initPosition(cb,attempts=0){
         // Prefer the left game-panel column unless user has opted into chat placement
-        const leftPanel=localStorage.getItem('sc_placement')!=='chat' && findLeftPanel();
+        const wantsLeft=localStorage.getItem('sc_placement')!=='chat';
+        const leftPanel=wantsLeft && findLeftPanel();
         if(leftPanel){
+          root.classList.remove('sc-placement-chat');
           // Sit below the first tile (the icon-row strip above Events) rather than above everything
           if(leftPanel.firstElementChild) leftPanel.firstElementChild.insertAdjacentElement('afterend',root);
           else leftPanel.appendChild(root);
           cb(); startRejectionWatcher(leftPanel,true); return;
         }
-        // Chat sidebar: inserted in-flow as its own card, stacked above the chat card
+        // Chat sidebar: inserted in-flow as its own card, stacked above the chat card.
+        // The left column can still be mid-animation-in the first ~3s, so unless chat
+        // is the actual preference, keep retrying for it instead of settling for chat here.
         const chatInput=document.getElementById('chat-input');
-        if(chatInput){
+        if(chatInput && (!wantsLeft || attempts>=10)){
           const insertBefore=chatInput.parentElement?.parentElement?.parentElement;
           if(insertBefore){
+            root.classList.add('sc-placement-chat');
             insertBefore.insertAdjacentElement('beforebegin',root);
             cb(); startRejectionWatcher(insertBefore.parentElement||document.body,true); return;
           }
@@ -1140,7 +1145,7 @@
         });
 
         let collapsed=false;
-        document.getElementById('sc-toggle').addEventListener('click',()=>{collapsed=!collapsed;body.style.display=collapsed?'none':'';document.getElementById('sc-toggle').textContent=collapsed?'+':'−';});
+        document.getElementById('sc-toggle').addEventListener('click',()=>{collapsed=!collapsed;body.style.display=collapsed?'none':'';document.getElementById('sc-toggle').classList.toggle('sc-collapsed',collapsed);});
 
         document.getElementById('sc-ss-full').addEventListener('click',()=>takeScreenshot(null));
         document.getElementById('sc-ss-crop').addEventListener('click',()=>enterCropScreenshot());
@@ -1492,6 +1497,7 @@
         border-bottom:3px solid color-mix(in srgb,var(--base-light,#dddec4) 60%,black);
         border-right:2px solid color-mix(in srgb,var(--base-light,#dddec4) 60%,black);
       }
+      #sc-root.sc-placement-chat { box-shadow:none; }
       .sc-hdr { display:flex;align-items:center;padding:4px;gap:5px;min-height:41px;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,0.15);box-shadow:rgba(255,255,255,0.5) 0 1px 0;user-select:none; }
       .sc-hdr-icon { color:var(--base-primary,#df4e1e);font-size:11px; }
       .sc-hdr-title { font-family:var(--base-font-primary,sofia-pro-variable,sans-serif);font-size:14px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;line-height:1.5;color:var(--base-dark-text,rgb(25,28,32)); }
@@ -1525,14 +1531,16 @@
       .sc-rec-btn--cancel { background:linear-gradient(to right,var(--base-dark-400,#191c20),var(--base-dark-500,#191c20));opacity:0.75; }
 
       .sc-toggle-collapse {
+        position:relative;
         width:24px;height:24px;box-sizing:border-box;padding:2px;
         display:inline-flex;align-items:center;justify-content:center;
-        font-size:13px;line-height:1;
         background:linear-gradient(to right,var(--base-primary-400,#df4e1e),var(--base-primary-500,#df4e1e));
         color:var(--base-light-text,#fff);
         border:none;border-radius:var(--radius-md,6px);
         cursor:pointer;transition:filter 0.1s;
       }
+      .sc-toggle-collapse::before { content:'';display:block;width:10px;height:2px;border-radius:1px;background:currentColor; }
+      .sc-toggle-collapse.sc-collapsed::after { content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:2px;height:10px;border-radius:1px;background:currentColor; }
       .sc-toggle-collapse:hover { filter:brightness(1.05); }
       .sc-toggle-collapse:active { filter:brightness(0.95); }
 
