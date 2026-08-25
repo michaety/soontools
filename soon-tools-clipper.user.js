@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.26
+// @version      1.5.27
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1032,8 +1032,9 @@
   const NATIVE_PRIMARY_BTN='bg-gradient-to-r from-primary-400 to-primary-500/90 active:to-primary-600/75 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
   const SC_ICON_ATTRS='viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
   const SC_CORNERS='<path d="M4 9V6a2 2 0 0 1 2-2h3"/><path d="M15 4h3a2 2 0 0 1 2 2v3"/><path d="M20 15v3a2 2 0 0 1-2 2h-3"/><path d="M9 20H6a2 2 0 0 1-2-2v-3"/>';
-  const ICON_SCREENSHOT=`<svg ${SC_ICON_ATTRS}>${SC_CORNERS}</svg>`;
-  const ICON_CROP_SCREENSHOT=`<svg ${SC_ICON_ATTRS}>${SC_CORNERS}<rect x="4" y="4" width="16" height="16" rx="2" stroke-width="1.2" stroke-dasharray="2.5 2.5"/></svg>`;
+  const SC_CAMERA='<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>';
+  const ICON_SCREENSHOT=`<svg ${SC_ICON_ATTRS}>${SC_CAMERA}</svg>`;
+  const ICON_CROP_SCREENSHOT=`<svg ${SC_ICON_ATTRS}>${SC_CORNERS}<g transform="translate(12,12) scale(0.46) translate(-12,-12)">${SC_CAMERA}</g></svg>`;
   const ICON_RECORD=`<svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="8" fill="currentColor"/></svg>`;
   const ICON_CROP_RECORD=`<svg ${SC_ICON_ATTRS}>${SC_CORNERS}<circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/></svg>`;
   const ICON_STOP=`<svg viewBox="0 0 24 24" width="14" height="14"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/></svg>`;
