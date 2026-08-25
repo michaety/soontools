@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.16
+// @version      1.5.17
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -943,7 +943,7 @@
   // ── SETTINGS ───────────────────────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════════
 
-  function buildSettingsPanel() {
+  function buildSettingsPanel(root, reinject) {
     const panel=document.createElement('div');
     panel.id='sc-settings';
     panel.style.cssText='display:none;position:absolute;right:0;top:100%;background:var(--base-light,#dddec4);background-image:var(--base-texture-background);border:1px solid rgba(0,0,0,0.2);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.2);z-index:9999;padding:10px;min-width:200px;';
@@ -977,7 +977,7 @@
       plUpdate();
       // Re-inject at new position
       root.remove();
-      inject();
+      reinject();
     });
     plRow.appendChild(plLbl); plRow.appendChild(plBtn); panel.appendChild(plRow);
 
@@ -1052,7 +1052,7 @@
 
       const stalePanel = document.getElementById('sc-settings');
       if(stalePanel){ stalePanel._abort?.abort(); stalePanel.remove(); } // clean up listeners + DOM
-      const settingsPanel=buildSettingsPanel();
+      const settingsPanel=buildSettingsPanel(root, inject);
       document.body.appendChild(settingsPanel);
 
       const body=document.createElement('div'); body.id='sc-body';
