@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.11
+// @version      1.5.12
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1082,35 +1082,54 @@
         el._messagesEl = messagesEl;
       }
 
-      function initPosition(cb,attempts=0){
+      // Find the left game-panel column (Events / Missions / Inventory stack).
+      // Heuristic: a narrow (150–320px) element flush with the left viewport edge
+      // that has multiple children — the native ftfp-map parent is the canonical match.
+      function findLeftPanel() {
         const ftfpMap=document.getElementById('ftfp-map');
-        const chatInput=document.getElementById('chat-input');
-        if(ftfpMap && ftfpMap.parentElement){
-          attachFixed(root, ftfpMap.parentElement);
-          cb(); startRejectionWatcher(ftfpMap.parentElement); return;
+        if(ftfpMap?.parentElement) return ftfpMap.parentElement;
+        // Walk 2 levels deep from body — the left column is always near the top of the tree
+        for(const child of document.body.children){
+          for(const el of [child,...child.children]){
+            const r=el.getBoundingClientRect();
+            if(r.left<=10 && r.width>=150 && r.width<=320 && r.height>=200 && el.children.length>=2) return el;
+          }
         }
+        return null;
+      }
+
+      function initPosition(cb,attempts=0){
+        // Prefer the left game-panel column — no layout fights with chat
+        const leftPanel=findLeftPanel();
+        if(leftPanel){
+          leftPanel.insertAdjacentElement('afterbegin',root);
+          cb(); startRejectionWatcher(leftPanel,true); return;
+        }
+        // Fallback: chat sidebar with fixed overlay + messages padding-top
+        const chatInput=document.getElementById('chat-input');
         if(chatInput){
           const insertBefore=chatInput.parentElement?.parentElement?.parentElement;
           const sidebarEl=insertBefore?.parentElement;
           if(sidebarEl){
-            attachFixed(root, sidebarEl); cb(); startRejectionWatcher(sidebarEl); return;
+            attachFixed(root, sidebarEl); cb(); startRejectionWatcher(sidebarEl,false); return;
           }
         }
         if(attempts<33) setTimeout(()=>initPosition(cb,attempts+1),300);
-        else { document.body.appendChild(root); cb(); startRejectionWatcher(document.body); } // fallback
+        else { document.body.appendChild(root); cb(); startRejectionWatcher(document.body,false); } // fallback
       }
 
-      // Watch for React removing the sidebar and re-inject when it does.
-      // Root lives on document.body, so we watch the sidebar container instead.
-      function startRejectionWatcher(container) {
-        const watchTarget = container.parentElement || document.body;
+      // inFlow=true  → root is inside `container` directly; watch container's children
+      // inFlow=false → root is on body as fixed overlay; watch container itself for removal
+      function startRejectionWatcher(container,inFlow) {
+        const watchTarget=inFlow ? container : (container.parentElement||document.body);
         const obs=new MutationObserver(()=>{
-          if(!document.contains(container)){
+          const gone=inFlow ? !document.contains(root) : !document.contains(container);
+          if(gone){
             obs.disconnect();
             if(reinjecting)return;
             reinjecting=true;
             root._pinRO?.disconnect();
-            if(root._messagesEl) root._messagesEl.style.paddingTop=''; // restore messages
+            if(root._messagesEl) root._messagesEl.style.paddingTop='';
             root.remove();
             setTimeout(()=>{ reinjecting=false; inject(); }, 1000);
           }
