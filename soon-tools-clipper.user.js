@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.27
+// @version      1.5.28
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1034,9 +1034,9 @@
   const SC_CORNERS='<path d="M4 9V6a2 2 0 0 1 2-2h3"/><path d="M15 4h3a2 2 0 0 1 2 2v3"/><path d="M20 15v3a2 2 0 0 1-2 2h-3"/><path d="M9 20H6a2 2 0 0 1-2-2v-3"/>';
   const SC_CAMERA='<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>';
   const ICON_SCREENSHOT=`<svg ${SC_ICON_ATTRS}>${SC_CAMERA}</svg>`;
-  const ICON_CROP_SCREENSHOT=`<svg ${SC_ICON_ATTRS}>${SC_CORNERS}<g transform="translate(12,12) scale(0.46) translate(-12,-12)">${SC_CAMERA}</g></svg>`;
+  const ICON_CROP_SCREENSHOT=`<svg ${SC_ICON_ATTRS}>${SC_CORNERS}<g transform="translate(12,12) scale(0.62) translate(-12,-12)">${SC_CAMERA}</g></svg>`;
   const ICON_RECORD=`<svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="8" fill="currentColor"/></svg>`;
-  const ICON_CROP_RECORD=`<svg ${SC_ICON_ATTRS}>${SC_CORNERS}<circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/></svg>`;
+  const ICON_CROP_RECORD=`<svg ${SC_ICON_ATTRS}>${SC_CORNERS}<circle cx="12" cy="12" r="5.5" fill="currentColor" stroke="none"/></svg>`;
   const ICON_STOP=`<svg viewBox="0 0 24 24" width="14" height="14"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/></svg>`;
   const ICON_SETTINGS=`<svg ${SC_ICON_ATTRS}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
 
