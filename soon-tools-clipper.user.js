@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.15
+// @version      1.5.16
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -966,10 +966,10 @@
     // Placement toggle — left panel vs chat sidebar
     const plRow=document.createElement('div'); plRow.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;';
     const plLbl=document.createElement('div');
-    plLbl.innerHTML='<span style="font-size:10px;color:rgba(0,0,0,0.65);">Position in chat</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">Move Clip to the chat sidebar</div>';
-    const plBtn=document.createElement('button'); plBtn.className='sc-toggle-btn';
+    plLbl.innerHTML='<span style="font-size:10px;color:rgba(0,0,0,0.65);">Position</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">Dock Clip on the left panel or by chat</div>';
+    const plBtn=document.createElement('button'); plBtn.className='sc-toggle-btn'; plBtn.style.cssText='min-width:44px;';
     const plOn=()=>localStorage.getItem('sc_placement')==='chat';
-    const plUpdate=()=>{plBtn.textContent=plOn()?'ON':'OFF';plBtn.classList.toggle('sc-toggle-btn--on',plOn());};
+    const plUpdate=()=>{plBtn.textContent=plOn()?'Right':'Left';plBtn.classList.toggle('sc-toggle-btn--on',plOn());};
     plUpdate();
     plBtn.addEventListener('click',e=>{
       e.stopPropagation();
