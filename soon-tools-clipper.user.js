@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.10
+// @version      1.5.11
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1042,54 +1042,58 @@
       inner.innerHTML='<div id="sc-status-row" class="sc-sublabel" style="min-height:13px;"></div><div id="sc-clips-list"></div>';
       body.appendChild(inner); root.appendChild(hdr); root.appendChild(body);
 
-      // Insert a placeholder at the desired DOM position.
-      // The placeholder acts as both a position anchor (fixed overlay reads its rect)
-      // and a space reservation (its height mirrors the widget height so chat content
-      // is pushed down rather than hidden behind the fixed overlay).
-      function attachFixed(el, anchorParent, anchorSibling) {
-        const placeholder = document.createElement('div');
-        placeholder.id = 'sc-placeholder';
-        placeholder.style.cssText = 'padding:0;margin:0;border:none;flex-shrink:0;pointer-events:none;';
-        if(anchorSibling) anchorSibling.insertAdjacentElement('beforebegin', placeholder);
-        else anchorParent.appendChild(placeholder);
+      // Find the first overflow-y:auto/scroll descendant — the scrollable messages list.
+      // padding-top on this element pushes messages below the widget without affecting
+      // the buttons/input which live outside this scroll container.
+      function findMessagesEl(sidebarEl) {
+        for(const el of sidebarEl.querySelectorAll('*')){
+          const ov=getComputedStyle(el).overflowY;
+          if(ov==='auto'||ov==='scroll') return el;
+        }
+        return null;
+      }
 
+      // Attach root to document.body as a fixed overlay aligned to the sidebar.
+      // No placeholder — nothing is added to the sidebar's flex flow.
+      // Instead, padding-top on the scrollable messages element creates the visual gap.
+      function attachFixed(el, sidebarEl) {
         document.body.appendChild(el);
+        const messagesEl = findMessagesEl(sidebarEl);
 
         function repin() {
-          const pr = placeholder.getBoundingClientRect();
-          if(!pr.width) return;
-          // Sync placeholder height to widget height — reserves layout space
-          const wh = el.offsetHeight;
-          if(Math.abs(placeholder.offsetHeight - wh) > 1) placeholder.style.height = wh + 'px';
+          const cr = sidebarEl.getBoundingClientRect();
+          if(!cr.width) return;
           el.style.position = 'fixed';
-          el.style.top    = pr.top  + 'px';
-          el.style.left   = pr.left + 'px';
-          el.style.width  = pr.width + 'px';
+          el.style.top    = cr.top  + 'px';
+          el.style.left   = cr.left + 'px';
+          el.style.width  = cr.width + 'px';
           el.style.zIndex = '9998';
+          // Push messages down to clear the widget — buttons/input are unaffected
+          if(messagesEl) messagesEl.style.paddingTop = el.offsetHeight + 'px';
         }
         repin();
         requestAnimationFrame(repin);
         if(el._pinRO) el._pinRO.disconnect();
-        // Watch both: placeholder (position/width) and el (height — collapse/expand/clips)
+        // Watch sidebar (position/width) and widget (height — expand/collapse/clips added)
         const ro = new ResizeObserver(repin);
-        ro.observe(placeholder);
+        ro.observe(sidebarEl);
         ro.observe(el);
         el._pinRO = ro;
-        el._placeholder = placeholder;
+        el._messagesEl = messagesEl;
       }
 
       function initPosition(cb,attempts=0){
         const ftfpMap=document.getElementById('ftfp-map');
         const chatInput=document.getElementById('chat-input');
         if(ftfpMap && ftfpMap.parentElement){
-          attachFixed(root, ftfpMap.parentElement, ftfpMap.nextElementSibling);
+          attachFixed(root, ftfpMap.parentElement);
           cb(); startRejectionWatcher(ftfpMap.parentElement); return;
         }
         if(chatInput){
           const insertBefore=chatInput.parentElement?.parentElement?.parentElement;
-          if(insertBefore?.parentElement){
-            attachFixed(root, insertBefore.parentElement, insertBefore);
-            cb(); startRejectionWatcher(insertBefore.parentElement); return;
+          const sidebarEl=insertBefore?.parentElement;
+          if(sidebarEl){
+            attachFixed(root, sidebarEl); cb(); startRejectionWatcher(sidebarEl); return;
           }
         }
         if(attempts<33) setTimeout(()=>initPosition(cb,attempts+1),300);
@@ -1106,7 +1110,7 @@
             if(reinjecting)return;
             reinjecting=true;
             root._pinRO?.disconnect();
-            root._placeholder?.remove();
+            if(root._messagesEl) root._messagesEl.style.paddingTop=''; // restore messages
             root.remove();
             setTimeout(()=>{ reinjecting=false; inject(); }, 1000);
           }
