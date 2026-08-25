@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.24
+// @version      1.5.25
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1034,7 +1034,7 @@
 
       const hdr=document.createElement('div'); hdr.className='sc-hdr';
       const NATIVE_DARK_BTN='bg-gradient-to-r from-dark-400/75 to-dark-500/75 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
-      const NATIVE_TERTIARY_BTN='bg-gradient-to-r from-tertiary-500 to-tertiary-600/75 active:to-tertiary-700/90 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
+      const NATIVE_DANGER_BTN='bg-gradient-to-r from-danger-500 to-danger-600/75 active:to-danger-700/90 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
       const NATIVE_PRIMARY_BTN='bg-gradient-to-r from-primary-400 to-primary-500/90 active:to-primary-600/75 p-0.5 inline-flex items-center justify-center cursor-pointer rounded-md hover:brightness-105 focus-visible:outline-1 focus-visible:outline-tertiary text-light-text w-[24px] h-[24px]';
       hdr.innerHTML=`
         <span class="sc-hdr-title">Clip</span>
@@ -1045,8 +1045,8 @@
             <button id="sc-ss-crop" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Crop screenshot">✂📷</button>
           </div>
           <div class="sc-btn-group" id="sc-rec-group">
-            <button id="sc-rec-full" class="sc-rec-btn ${NATIVE_TERTIARY_BTN}" title="Record fullscreen">⏺</button>
-            <button id="sc-rec-crop" class="sc-rec-btn sc-rec-btn--crop ${NATIVE_TERTIARY_BTN}" title="Record selection">✂</button>
+            <button id="sc-rec-full" class="sc-rec-btn ${NATIVE_DANGER_BTN}" title="Record fullscreen">⏺</button>
+            <button id="sc-rec-crop" class="sc-rec-btn sc-rec-btn--crop ${NATIVE_DANGER_BTN}" title="Record selection">✂</button>
           </div>
           <button id="sc-settings-btn" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Settings">⚙</button>
           <button id="sc-toggle" class="sc-toggle-collapse ${NATIVE_PRIMARY_BTN}" title="Collapse"></button>
