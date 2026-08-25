@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.22
+// @version      1.5.23
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1061,17 +1061,19 @@
       body.appendChild(inner); root.appendChild(hdr); root.appendChild(body);
 
       // Find the left game-panel column (Events / Missions / Inventory stack).
-      // Heuristic: a narrow (150–320px) element near the left viewport edge
-      // that has multiple children — the native ftfp-map parent is the canonical match.
+      // Matched by its stable "left-0" positioning class rather than its current
+      // on-screen position — the column slides in from off-screen on load, so a
+      // bounding-rect check can catch it mid-animation and wrongly conclude it
+      // isn't there yet.
       function findLeftPanel() {
         const ftfpMap=document.getElementById('ftfp-map');
         if(ftfpMap?.parentElement) return ftfpMap.parentElement;
-        // Scan the whole tree (document order = ancestors before descendants,
-        // so the first match is the outer column, not a card inside it) —
-        // the column isn't always a fixed depth from body.
-        for(const el of document.querySelectorAll('div')){
-          const r=el.getBoundingClientRect();
-          if(r.left>=0 && r.left<=40 && r.width>=150 && r.width<=320 && r.height>=200 && el.children.length>=2 && el.children.length<=8) return el;
+        for(const el of document.querySelectorAll('div[class*="left-0"]')){
+          let target = el;
+          // Unwrap single-child positioning shells to reach the actual card column
+          while(target.children.length===1 && target.firstElementChild.tagName==='DIV') target = target.firstElementChild;
+          const r=target.getBoundingClientRect();
+          if(r.width>=150 && r.width<=320 && r.height>=200 && target.children.length>=2 && target.children.length<=8) return target;
         }
         return null;
       }
