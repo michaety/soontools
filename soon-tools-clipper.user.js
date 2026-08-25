@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.13
+// @version      1.5.14
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1087,7 +1087,7 @@
           el.style.top    = cr.top  + 'px';
           el.style.left   = cr.left + 'px';
           el.style.width  = cr.width + 'px';
-          el.style.zIndex = '9998';
+          el.style.zIndex = '2147483630';
           // Push messages down to clear the widget — buttons/input are unaffected
           if(messagesEl) messagesEl.style.paddingTop = el.offsetHeight + 'px';
         }
