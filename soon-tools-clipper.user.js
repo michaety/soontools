@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.19
+// @version      1.5.20
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1486,7 +1486,7 @@
         overflow:hidden;
         background:var(--base-light,#dddec4);
         background-image:var(--base-texture-panel,var(--base-texture-background));
-        box-shadow:rgba(0,0,0,0.314) 0 6px 8px 0, rgba(0,0,0,0.314) 2px 2px 0 0;
+        box-shadow:rgba(0,0,0,0.3) 0 1px 3px 0;
         border-top:2px solid color-mix(in srgb,var(--base-light,#dddec4) 80%,white);
         border-left:2px solid color-mix(in srgb,var(--base-light,#dddec4) 80%,white);
         border-bottom:3px solid color-mix(in srgb,var(--base-light,#dddec4) 60%,black);
