@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.14
+// @version      1.5.15
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -976,8 +976,6 @@
       localStorage.setItem('sc_placement',plOn()?'left':'chat');
       plUpdate();
       // Re-inject at new position
-      root._pinRO?.disconnect();
-      if(root._messagesEl) root._messagesEl.style.paddingTop='';
       root.remove();
       inject();
     });
@@ -1062,46 +1060,6 @@
       inner.innerHTML='<div id="sc-status-row" class="sc-sublabel" style="min-height:13px;"></div><div id="sc-clips-list"></div>';
       body.appendChild(inner); root.appendChild(hdr); root.appendChild(body);
 
-      // Find the first overflow-y:auto/scroll descendant — the scrollable messages list.
-      // padding-top on this element pushes messages below the widget without affecting
-      // the buttons/input which live outside this scroll container.
-      function findMessagesEl(sidebarEl) {
-        for(const el of sidebarEl.querySelectorAll('*')){
-          const ov=getComputedStyle(el).overflowY;
-          if(ov==='auto'||ov==='scroll') return el;
-        }
-        return null;
-      }
-
-      // Attach root to document.body as a fixed overlay aligned to the sidebar.
-      // No placeholder — nothing is added to the sidebar's flex flow.
-      // Instead, padding-top on the scrollable messages element creates the visual gap.
-      function attachFixed(el, sidebarEl) {
-        document.body.appendChild(el);
-        const messagesEl = findMessagesEl(sidebarEl);
-
-        function repin() {
-          const cr = sidebarEl.getBoundingClientRect();
-          if(!cr.width) return;
-          el.style.position = 'fixed';
-          el.style.top    = cr.top  + 'px';
-          el.style.left   = cr.left + 'px';
-          el.style.width  = cr.width + 'px';
-          el.style.zIndex = '2147483630';
-          // Push messages down to clear the widget — buttons/input are unaffected
-          if(messagesEl) messagesEl.style.paddingTop = el.offsetHeight + 'px';
-        }
-        repin();
-        requestAnimationFrame(repin);
-        if(el._pinRO) el._pinRO.disconnect();
-        // Watch sidebar (position/width) and widget (height — expand/collapse/clips added)
-        const ro = new ResizeObserver(repin);
-        ro.observe(sidebarEl);
-        ro.observe(el);
-        el._pinRO = ro;
-        el._messagesEl = messagesEl;
-      }
-
       // Find the left game-panel column (Events / Missions / Inventory stack).
       // Heuristic: a narrow (150–320px) element flush with the left viewport edge
       // that has multiple children — the native ftfp-map parent is the canonical match.
@@ -1125,13 +1083,13 @@
           leftPanel.insertAdjacentElement('afterbegin',root);
           cb(); startRejectionWatcher(leftPanel,true); return;
         }
-        // Chat sidebar: fixed overlay + messages padding-top
+        // Chat sidebar: inserted in-flow as its own card, stacked above the chat card
         const chatInput=document.getElementById('chat-input');
         if(chatInput){
           const insertBefore=chatInput.parentElement?.parentElement?.parentElement;
-          const sidebarEl=insertBefore?.parentElement;
-          if(sidebarEl){
-            attachFixed(root, sidebarEl); cb(); startRejectionWatcher(sidebarEl,false); return;
+          if(insertBefore){
+            insertBefore.insertAdjacentElement('beforebegin',root);
+            cb(); startRejectionWatcher(insertBefore.parentElement||document.body,true); return;
           }
         }
         if(attempts<33) setTimeout(()=>initPosition(cb,attempts+1),300);
@@ -1148,8 +1106,6 @@
             obs.disconnect();
             if(reinjecting)return;
             reinjecting=true;
-            root._pinRO?.disconnect();
-            if(root._messagesEl) root._messagesEl.style.paddingTop='';
             root.remove();
             setTimeout(()=>{ reinjecting=false; inject(); }, 1000);
           }
