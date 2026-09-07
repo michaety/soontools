@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.33
+// @version      1.5.34
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1466,7 +1466,7 @@
           <button class="sc-qbtn" data-sec="120">2m</button>
           <button class="sc-qbtn sc-qbtn-reset">Reset</button>
         </div>
-        <button class="sc-dl-btn">↓ Save MP4</button>
+        <button class="sc-dl-btn" title="Save MP4">MP4 ↓</button>
       </div>
       <div class="sc-clip-status" id="sc-cst-${clip.id}" style="display:none;"></div>`;
 
@@ -1700,9 +1700,12 @@
       .sc-switch input { position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer; }
       .sc-switch-track { position:absolute;inset:0;background:rgba(0,0,0,0.25);border-radius:999px;transition:background 0.15s ease; }
       .sc-switch-track::before { content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.4);transition:transform 0.15s ease; }
-      .sc-switch input:checked + .sc-switch-track { background:var(--base-secondary,#26b64b); }
+      /* Same accent var as the record button / timeline fill / download button
+         elsewhere in this panel, so the switch follows the site's own theme
+         editor instead of being pinned to a fixed green. */
+      .sc-switch input:checked + .sc-switch-track { background:var(--base-primary,#df4e1e); }
       .sc-switch input:checked + .sc-switch-track::before { transform:translateX(16px); }
-      .sc-switch input:focus-visible + .sc-switch-track { outline:2px solid var(--base-secondary,#26b64b);outline-offset:2px; }
+      .sc-switch input:focus-visible + .sc-switch-track { outline:2px solid var(--base-primary,#df4e1e);outline-offset:2px; }
 
       #sc-body { background:transparent; }
       .sc-inner { padding:4px;display:flex;flex-direction:column;gap:8px; }
@@ -1738,7 +1741,11 @@
       /* transform forces this off Chrome's hardware video-overlay compositing path on
          Windows, which otherwise can stretch the decoded frame to fill the box and
          ignore object-fit entirely — the file itself is unaffected, only this <video>. */
-      .sc-clip-video { width:100%;display:block;background:#000;height:180px;object-fit:cover;border-radius:var(--radius-sm,2px);margin-top:5px;transform:translateZ(0); }
+      /* object-fit:contain (not cover) — the left-docked panel is much narrower
+         than a typical camera feed's aspect ratio, so cover was cropping hard
+         into the sides to fill the box, which read as a "stretched"/zoomed
+         preview even though the recording itself was untouched. */
+      .sc-clip-video { width:100%;display:block;background:#000;height:180px;object-fit:contain;border-radius:var(--radius-sm,2px);margin-top:5px;transform:translateZ(0); }
 
       .sc-player-row { display:flex;align-items:center;gap:6px; }
       .sc-play-btn { width:22px;height:22px;border-radius:50%;background:var(--base-primary,#df4e1e);border:none;color:white;font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity 0.1s; }
@@ -1767,7 +1774,7 @@
       .sc-card-actions { display:flex;justify-content:space-between;align-items:center;gap:6px; }
       .sc-qbtn { padding:2px 5px;font-size:9px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;letter-spacing:0.04em;text-transform:uppercase;background:var(--base-light,#dddec4);border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);color:var(--base-dark-text,rgb(25,28,32));opacity:0.7;cursor:pointer;transition:background 0.1s; }
       .sc-qbtn:hover { background:var(--base-light-300,#c8c9a8); }
-      .sc-dl-btn { padding:4px 10px;font-size:10px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;letter-spacing:0.04em;text-transform:uppercase;background:var(--base-primary,#df4e1e);border:none;border-radius:var(--radius-sm,3px);color:white;cursor:pointer;transition:opacity 0.1s; }
+      .sc-dl-btn { padding:4px 7px;font-size:9px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;letter-spacing:0.04em;text-transform:uppercase;background:var(--base-primary,#df4e1e);border:none;border-radius:var(--radius-sm,3px);color:white;cursor:pointer;transition:opacity 0.1s;white-space:nowrap; }
       .sc-dl-btn:hover { opacity:0.85; }
       .sc-dl-btn-sm { padding:2px 6px;font-size:9px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;background:var(--base-primary,#df4e1e);border:none;border-radius:var(--radius-sm,3px);color:white;cursor:pointer;transition:opacity 0.1s; }
       .sc-dl-btn-sm:hover { opacity:0.85; }
