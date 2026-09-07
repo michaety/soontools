@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.29
+// @version      1.5.30
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -59,6 +59,40 @@
     }
     mainVideoEl = best;
     return best;
+  }
+
+  // Some cams are mounted sideways and the site rotates them upright with a CSS
+  // transform (on the <video> itself or an ancestor) rather than actually
+  // re-encoding the stream. canvas.drawImage() samples the raw decoded frame,
+  // which ignores that transform entirely — so screenshots/recordings of a
+  // rotated cam come out sideways unless we detect and replicate the rotation.
+  function getVideoRotationDeg(vid) {
+    let matrix = new DOMMatrix();
+    for (let el = vid; el && el !== document.documentElement; el = el.parentElement) {
+      const t = getComputedStyle(el).transform;
+      if (t && t !== 'none') {
+        try { matrix = new DOMMatrix(t).multiply(matrix); } catch (e) {}
+      }
+    }
+    const deg = Math.round(Math.atan2(matrix.b, matrix.a) * 180 / Math.PI / 90) * 90;
+    return ((deg % 360) + 360) % 360; // normalise to 0/90/180/270
+  }
+
+  // Draws vid onto ctx at (0,0) sized vw×vh, applying the rotation detected by
+  // getVideoRotationDeg. Caller must size the canvas to match (swap w/h for 90/270).
+  function drawRotatedFrame(ctx, vid, vw, vh, rotation) {
+    if (!rotation) { ctx.drawImage(vid, 0, 0, vw, vh); return; }
+    // save/restore since ctx transform state persists across calls unless the
+    // canvas's own width/height is reassigned — this can be called every frame
+    // with unchanged canvas dimensions, so it must not accumulate rotations.
+    ctx.save();
+    switch (rotation) {
+      case 90:  ctx.translate(vh, 0); ctx.rotate(Math.PI / 2); break;
+      case 180: ctx.translate(vw, vh); ctx.rotate(Math.PI); break;
+      case 270: ctx.translate(0, vw); ctx.rotate(-Math.PI / 2); break;
+    }
+    ctx.drawImage(vid, 0, 0, vw, vh);
+    ctx.restore();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -238,6 +272,7 @@
   class RecordingSession {
     constructor(cropRegion) {
       this.cropRegion  = cropRegion || null;
+      this._rotation   = 0; // set in start() — degrees the source cam is CSS-rotated by
       this.isActive    = false;
       this.seconds     = 0;
       this._chunks     = [];
@@ -288,10 +323,14 @@
       if (sharedAudioCtx.state === 'suspended') await sharedAudioCtx.resume().catch(() => {});
       _loadAssets();
 
-      // Canvas
+      // Canvas — some cams are mounted sideways and shown upright via a CSS
+      // rotation the site applies; replicate it here since captureStream()
+      // only sees the raw (unrotated) decoded frame.
       const vw = vid.videoWidth || 1920, vh = vid.videoHeight || 1080;
+      this._rotation = this.cropRegion ? 0 : getVideoRotationDeg(vid); // crop coords are screen-space already; skip there
+      const swapped = this._rotation===90 || this._rotation===270;
       this._canvas = document.createElement('canvas');
-      this._canvas.width = vw; this._canvas.height = vh;
+      this._canvas.width = swapped?vh:vw; this._canvas.height = swapped?vw:vh;
       this._ctx = this._canvas.getContext('2d');
 
       // Stream + audio
@@ -521,8 +560,10 @@
         if (this._canvas.width !== cw || this._canvas.height !== ch) { this._canvas.width = cw; this._canvas.height = ch; }
         this._ctx.drawImage(cv, cr.x*vw, cr.y*vh, cr.w*vw, cr.h*vh, 0, 0, cw, ch);
       } else {
-        if (this._canvas.width !== vw || this._canvas.height !== vh) { this._canvas.width = vw; this._canvas.height = vh; }
-        this._ctx.drawImage(cv, 0, 0, vw, vh);
+        const swapped = this._rotation===90 || this._rotation===270;
+        const cw = swapped?vh:vw, ch = swapped?vw:vh;
+        if (this._canvas.width !== cw || this._canvas.height !== ch) { this._canvas.width = cw; this._canvas.height = ch; }
+        drawRotatedFrame(this._ctx, cv, vw, vh, this._rotation);
       }
       requestAnimationFrame(ts => this._drawFrame(ts));
     }
@@ -968,8 +1009,10 @@
       canvas.width=sw; canvas.height=sh;
       canvas.getContext('2d').drawImage(vid,sx,sy,sw,sh,0,0,sw,sh);
     }else{
-      canvas.width=vw; canvas.height=vh;
-      canvas.getContext('2d').drawImage(vid,0,0,vw,vh);
+      const rotation=getVideoRotationDeg(vid);
+      const swapped=rotation===90||rotation===270;
+      canvas.width=swapped?vh:vw; canvas.height=swapped?vw:vh;
+      drawRotatedFrame(canvas.getContext('2d'),vid,vw,vh,rotation);
     }
     canvas.toBlob(blob=>{
       const filename='soontools_screenshot_'+Date.now()+'.png';
@@ -1637,7 +1680,10 @@
       .sc-card-toggle { font-size:11px;width:18px;height:18px;border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);background:var(--base-light,#dddec4);color:var(--base-dark-text,rgb(25,28,32));opacity:0.65;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1; }
       .sc-card-toggle:hover { background:var(--base-light-300,#c8c9a8); }
       .sc-card-body { padding:0 6px 6px;display:flex;flex-direction:column;gap:5px;border-top:1px solid rgba(0,0,0,0.08); }
-      .sc-clip-video { width:100%;display:block;background:#000;height:180px;object-fit:cover;border-radius:var(--radius-sm,2px);margin-top:5px; }
+      /* transform forces this off Chrome's hardware video-overlay compositing path on
+         Windows, which otherwise can stretch the decoded frame to fill the box and
+         ignore object-fit entirely — the file itself is unaffected, only this <video>. */
+      .sc-clip-video { width:100%;display:block;background:#000;height:180px;object-fit:cover;border-radius:var(--radius-sm,2px);margin-top:5px;transform:translateZ(0); }
 
       .sc-player-row { display:flex;align-items:center;gap:6px; }
       .sc-play-btn { width:22px;height:22px;border-radius:50%;background:var(--base-primary,#df4e1e);border:none;color:white;font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity 0.1s; }
