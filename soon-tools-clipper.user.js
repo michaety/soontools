@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.30
+// @version      1.5.31
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -129,7 +129,9 @@
       lastOverlayDraw=ts;
       const r = getVidRect();
       canvas.style.left = r.left+'px'; canvas.style.top = r.top+'px';
-      canvas.width = Math.round(r.width); canvas.height = Math.round(r.height);
+      // Reassigning width/height reallocates the backing store — only do it on change
+      const cw = Math.round(r.width), ch = Math.round(r.height);
+      if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
       ctx.clearRect(0,0,canvas.width,canvas.height);
       ctx.fillStyle = 'rgba(0,0,0,0.35)';
       ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -308,8 +310,9 @@
       this._staticSoundPlaying = false; // true while sound is active OR already played this gap
       this._staticSoundFired = false;   // true once fired for current static gap, reset when stream returns
 
-      // rAF state
+      // rAF state — bind the callback once instead of allocating a closure per frame
       this._lastDrawTs = 0;
+      this._boundDraw = ts => this._drawFrame(ts);
     }
 
     async start() {
@@ -372,7 +375,7 @@
       if (this.cropRegion) showRecordingCropOverlay(vid, this.cropRegion);
 
       // Start draw loop
-      requestAnimationFrame(ts => this._drawFrame(ts));
+      requestAnimationFrame(this._boundDraw);
 
       updateRecordBtn(false, true);
       showStatus('Recording — press ⏹ to stop', 'rec');
@@ -526,7 +529,7 @@
     _drawFrame(ts) {
       if (!this.isActive) return; // session ended — rAF loop stops here
       if (document.hidden || ts - this._lastDrawTs < 41.67) { // ~24fps, skip entirely when tab backgrounded
-        requestAnimationFrame(ts => this._drawFrame(ts));
+        requestAnimationFrame(this._boundDraw);
         return;
       }
       this._lastDrawTs = ts;
@@ -540,7 +543,7 @@
           this._drawStatic(this._canvas.width, this._canvas.height);
           this._startStaticSound();
         }
-        requestAnimationFrame(ts => this._drawFrame(ts));
+        requestAnimationFrame(this._boundDraw);
         return;
       }
       // Stream is back — stop static sound and reset for next gap
@@ -565,7 +568,7 @@
         if (this._canvas.width !== cw || this._canvas.height !== ch) { this._canvas.width = cw; this._canvas.height = ch; }
         drawRotatedFrame(this._ctx, cv, vw, vh, this._rotation);
       }
-      requestAnimationFrame(ts => this._drawFrame(ts));
+      requestAnimationFrame(this._boundDraw);
     }
 
     _watchCam() {
@@ -631,21 +634,23 @@
   // ── WEBM DURATION FIX ──────────────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════════
 
-  function fixWebmDuration(chunks,durationSec) {
-    return new Promise(resolve=>{
-      new Blob(chunks).arrayBuffer().then(buf=>{
-        const data=new Uint8Array(buf), view=new DataView(buf);
-        const scanLimit = Math.min(data.length - 12, 2048); // Duration is always in first ~200 bytes
-        for(let i=0;i<scanLimit;i++){
-          if(data[i]===0x44&&data[i+1]===0x89){
-            const st=data[i+2];
-            if(st===0x88){view.setFloat64(i+3,durationSec*1000,false);resolve(buf);return;}
-            if(st===0x84){view.setFloat32(i+3,durationSec*1000,false);resolve(buf);return;}
-          }
-        }
-        resolve(buf);
-      });
-    });
+  // Patches the EBML Duration element and returns Blob parts for the fixed file.
+  // Only the first few KB are read into memory — the rest of the (potentially
+  // 100MB+) recording stays a lazy Blob slice instead of a full heap copy.
+  const WEBM_HEAD_BYTES = 4096;
+  async function fixWebmDuration(chunks,durationSec) {
+    const whole=new Blob(chunks);
+    const head=await whole.slice(0,WEBM_HEAD_BYTES).arrayBuffer();
+    const data=new Uint8Array(head), view=new DataView(head);
+    const scanLimit = Math.min(data.length - 12, 2048); // Duration is always in first ~200 bytes
+    for(let i=0;i<scanLimit;i++){
+      if(data[i]===0x44&&data[i+1]===0x89){
+        const st=data[i+2];
+        if(st===0x88){view.setFloat64(i+3,durationSec*1000,false);break;}
+        if(st===0x84){view.setFloat32(i+3,durationSec*1000,false);break;}
+      }
+    }
+    return [head, whole.slice(WEBM_HEAD_BYTES)];
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -686,13 +691,17 @@
       if(el) el.textContent='Processing… '+ps+'s';
     },1000);
 
-    // fixWebmDuration only applies to WebM — MP4 containers don't have the EBML Duration element
-    const fixDuration = mimeType.startsWith('video/mp4')
-      ? new Blob(chunksSnapshot).arrayBuffer()
+    // MP4 needs no patching — hand the recorder chunks straight to the Blob
+    // constructor (zero-copy; a Blob of Blobs is lazy). WebM reads only its
+    // first few KB to patch Duration. Previously both paths pulled the entire
+    // recording into an ArrayBuffer — ~150MB for a 5-min clip — on the main
+    // thread, just to wrap it back into a Blob.
+    const buildParts = mimeType.startsWith('video/mp4')
+      ? Promise.resolve(chunksSnapshot)
       : fixWebmDuration(chunksSnapshot,durationSec);
-    fixDuration.then(fixedBuf=>{
+    buildParts.then(parts=>{
       clearInterval(pt);
-      const blob=new Blob([fixedBuf],{type:mimeType});
+      const blob=new Blob(parts,{type:mimeType});
       clip.blob=blob; clip.blobUrl=URL.createObjectURL(blob); clip.processing=false;
       const existing=document.querySelector(`[data-clip-id="${clipId}"]`);
       const fullCard=buildClipCard(clip,true);
@@ -771,7 +780,9 @@
       const cLeft=el.left+ox, cTop=el.top+oy;
       const rx=cLeft+region.x*rw, ry=cTop+region.y*rh, rw2=region.w*rw, rh2=region.h*rh;
       canvas.style.left=cLeft+'px'; canvas.style.top=cTop+'px';
-      canvas.width=Math.round(rw); canvas.height=Math.round(rh);
+      // Reassigning width/height reallocates the backing store — only do it on change
+      const cw=Math.round(rw), ch=Math.round(rh);
+      if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch;}
       ctx.clearRect(0,0,canvas.width,canvas.height);
       const cx=rx-cLeft, cy=ry-cTop;
       ctx.shadowColor='#df4e1e'; ctx.shadowBlur=10; ctx.strokeStyle='#df4e1e'; ctx.lineWidth=2; ctx.setLineDash([]);
@@ -1314,6 +1325,12 @@
 
   function updateRecordBtn(inFrameMode,isRecording){
     if(!UI.recFull)return;
+    // Called every second while recording (so it self-heals after a React
+    // re-inject swaps the buttons out). Skip the innerHTML/className rewrite
+    // when nothing changed — otherwise the SVG is re-parsed on every tick.
+    const state=isRecording?'rec':inFrameMode?'frame':'idle';
+    if(UI.recFull.dataset.scState===state)return;
+    UI.recFull.dataset.scState=state;
     if(isRecording){
       UI.recFull.innerHTML=ICON_STOP; UI.recFull.className=`sc-rec-btn sc-rec-btn--stop ${NATIVE_DANGER_BTN}`; UI.recFull.title='Stop recording';
       UI.recCrop.style.display='none';
