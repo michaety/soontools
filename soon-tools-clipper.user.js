@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.31
+// @version      1.5.32
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1055,34 +1055,37 @@
     title.style.cssText='font-size:10px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.5;margin-bottom:8px;';
     title.textContent='Settings'; panel.appendChild(title);
 
+    // iOS-style on/off switch — used for the two boolean settings below.
+    // (Keyboard-shortcut capture buttons further down show text, not a bool,
+    // so they keep the plain .sc-toggle-btn chrome instead of this.)
+    function buildSwitch(checked,onChange){
+      const label=document.createElement('label'); label.className='sc-switch';
+      const input=document.createElement('input'); input.type='checkbox'; input.checked=checked;
+      const track=document.createElement('span'); track.className='sc-switch-track';
+      label.appendChild(input); label.appendChild(track);
+      label.addEventListener('click',e=>e.stopPropagation());
+      input.addEventListener('change',()=>onChange(input.checked));
+      return label;
+    }
+
     // Multi-cam toggle
     const mcRow=document.createElement('div'); mcRow.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;';
     const mcLbl=document.createElement('div');
     mcLbl.innerHTML='<span style="font-size:10px;color:var(--base-dark-text,rgb(25,28,32));opacity:0.65;">Multi-cam mode</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">Record continuously across cam switches</div>';
-    const mcBtn=document.createElement('button'); mcBtn.className='sc-toggle-btn';
-    const mcOn=()=>localStorage.getItem('sc_multicam')==='1';
-    const mcUpdate=()=>{mcBtn.textContent=mcOn()?'ON':'OFF';mcBtn.classList.toggle('sc-toggle-btn--on',mcOn());};
-    mcUpdate();
-    mcBtn.addEventListener('click',e=>{e.stopPropagation();localStorage.setItem('sc_multicam',mcOn()?'0':'1');mcUpdate();});
-    mcRow.appendChild(mcLbl); mcRow.appendChild(mcBtn); panel.appendChild(mcRow);
+    const mcSwitch=buildSwitch(localStorage.getItem('sc_multicam')==='1',checked=>{localStorage.setItem('sc_multicam',checked?'1':'0');});
+    mcRow.appendChild(mcLbl); mcRow.appendChild(mcSwitch); panel.appendChild(mcRow);
 
-    // Placement toggle — left panel vs chat sidebar
+    // Placement toggle — left panel vs chat sidebar. Switch ON = docked left.
     const plRow=document.createElement('div'); plRow.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;';
     const plLbl=document.createElement('div');
-    plLbl.innerHTML='<span style="font-size:10px;color:var(--base-dark-text,rgb(25,28,32));opacity:0.65;">Position</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">Dock Clip on the left panel or by chat</div>';
-    const plBtn=document.createElement('button'); plBtn.className='sc-toggle-btn'; plBtn.style.cssText='min-width:44px;';
-    const plOn=()=>localStorage.getItem('sc_placement')==='chat';
-    const plUpdate=()=>{plBtn.textContent=plOn()?'Right':'Left';plBtn.classList.toggle('sc-toggle-btn--on',plOn());};
-    plUpdate();
-    plBtn.addEventListener('click',e=>{
-      e.stopPropagation();
-      localStorage.setItem('sc_placement',plOn()?'left':'chat');
-      plUpdate();
+    plLbl.innerHTML='<span style="font-size:10px;color:var(--base-dark-text,rgb(25,28,32));opacity:0.65;">Left side</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">On docks Clip in the left panel, off docks it by chat</div>';
+    const plSwitch=buildSwitch(localStorage.getItem('sc_placement')!=='chat',checked=>{
+      localStorage.setItem('sc_placement',checked?'left':'chat');
       // Re-inject at new position
       root.remove();
       reinject();
     });
-    plRow.appendChild(plLbl); plRow.appendChild(plBtn); panel.appendChild(plRow);
+    plRow.appendChild(plLbl); plRow.appendChild(plSwitch); panel.appendChild(plRow);
 
     const sep=document.createElement('div'); sep.style.cssText='border-top:1px solid rgba(0,0,0,0.1);margin:8px 0 6px;'; panel.appendChild(sep);
     const kbTitle=document.createElement('div'); kbTitle.style.cssText='font-size:9px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.4;margin-bottom:6px;'; kbTitle.textContent='Keyboard Shortcuts'; panel.appendChild(kbTitle);
@@ -1666,6 +1669,14 @@
       .sc-toggle-btn { font-family:var(--base-font-primary,sofia-pro-variable,sans-serif);font-size:10px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;padding:2px 8px;background:rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-md,6px);cursor:pointer;min-width:40px;text-align:center;transition:background 0.1s,color 0.1s; }
       .sc-toggle-btn--on { background:rgba(223,78,30,0.15);border-color:var(--base-primary,#df4e1e);color:var(--base-primary,#df4e1e); }
 
+      .sc-switch { position:relative;display:inline-block;width:38px;height:22px;flex-shrink:0;cursor:pointer; }
+      .sc-switch input { position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer; }
+      .sc-switch-track { position:absolute;inset:0;background:rgba(0,0,0,0.25);border-radius:999px;transition:background 0.15s ease; }
+      .sc-switch-track::before { content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.4);transition:transform 0.15s ease; }
+      .sc-switch input:checked + .sc-switch-track { background:var(--base-secondary,#26b64b); }
+      .sc-switch input:checked + .sc-switch-track::before { transform:translateX(16px); }
+      .sc-switch input:focus-visible + .sc-switch-track { outline:2px solid var(--base-secondary,#26b64b);outline-offset:2px; }
+
       #sc-body { background:transparent; }
       .sc-inner { padding:4px;display:flex;flex-direction:column;gap:8px; }
       #sc-clips-list { max-height:520px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(0,0,0,0.2) transparent; }
@@ -1709,6 +1720,11 @@
       .sc-mute-btn:hover { background:var(--base-light-300,#c8c9a8); }
       .sc-skip-btn { font-size:10px;padding:2px 4px;background:var(--base-light,#dddec4);border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);color:var(--base-dark-text,rgb(25,28,32));opacity:0.7;cursor:pointer;flex-shrink:0;transition:background 0.1s; }
       .sc-skip-btn:hover { background:var(--base-light-300,#c8c9a8); }
+      /* Left-docked panel is narrower than the chat-sidebar placement, and the
+         player row was cramped — drop the ±5s skip buttons there to give the
+         timeline more room for trimming; keep them where there's space (chat). */
+      #sc-root:not(.sc-placement-chat) .sc-skip-btn[data-skip="5"],
+      #sc-root:not(.sc-placement-chat) .sc-skip-btn[data-skip="-5"] { display:none; }
       .sc-time-display { font-size:9px;opacity:0.5;font-family:monospace;flex-shrink:0; }
 
       .sc-timeline { position:relative;flex:1;height:24px;background:rgba(0,0,0,0.1);border-radius:var(--radius-sm,3px);cursor:pointer;display:inline-block;border:1px solid rgba(0,0,0,0.1);overflow:visible; }
