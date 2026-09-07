@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.32
+// @version      1.5.33
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -95,6 +95,29 @@
     ctx.restore();
   }
 
+  // ctx.shadowBlur is a real per-pixel software blur, not a GPU effect — cheap
+  // once, expensive if re-run every frame for a rect that isn't actually
+  // changing (e.g. a static crop-recording border drawn at 30fps for up to 5
+  // minutes). This renders the glowing stroke to an offscreen canvas once per
+  // distinct size/position and reuses it until the caller asks for a different
+  // one — pass the same `cache` object (e.g. `{}` created once outside the
+  // draw loop) across calls so it persists between frames.
+  function drawCachedGlowRect(ctx, cache, x, y, w, h, color, blur, lineWidth, lineDash) {
+    const key = x+'|'+y+'|'+w+'|'+h+'|'+color+'|'+blur+'|'+lineWidth+'|'+(lineDash||'');
+    if (cache.key !== key) {
+      const pad = Math.ceil(blur * 3) + lineWidth; // shadow can extend ~3x its blur radius
+      const gc = cache.canvas || document.createElement('canvas');
+      gc.width = Math.ceil(w + pad*2); gc.height = Math.ceil(h + pad*2);
+      const gctx = gc.getContext('2d');
+      gctx.shadowColor = color; gctx.shadowBlur = blur;
+      gctx.strokeStyle = color; gctx.lineWidth = lineWidth;
+      if (lineDash) gctx.setLineDash(lineDash);
+      gctx.strokeRect(pad, pad, w, h);
+      cache.canvas = gc; cache.pad = pad; cache.key = key;
+    }
+    ctx.drawImage(cache.canvas, x - cache.pad, y - cache.pad);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // ── FRAME MODE ─────────────────────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════════
@@ -123,6 +146,7 @@
     let drag = null, dashOffset = 0;
 
     let lastOverlayDraw=0;
+    const idleGlowCache={}; // persists across frames — see drawCachedGlowRect
     function updateCanvas(ts) {
       if (!document.getElementById('sc-crop-canvas')) return;
       if(document.hidden||ts-lastOverlayDraw<33){requestAnimationFrame(updateCanvas);return;} // ~30fps, skip when tab backgrounded
@@ -145,8 +169,8 @@
         ctx.lineDashOffset=-dashOffset; ctx.strokeRect(x+0.5,y+0.5,w-1,h-1); ctx.setLineDash([]);
         dashOffset=(dashOffset+0.5)%10;
       } else {
-        ctx.shadowColor='#df4e1e'; ctx.shadowBlur=8; ctx.strokeStyle='#df4e1e'; ctx.lineWidth=2; ctx.setLineDash([6,4]);
-        ctx.strokeRect(1,1,canvas.width-2,canvas.height-2); ctx.setLineDash([]); ctx.shadowBlur=0;
+        // Static (no dash animation here) — fully cacheable across frames.
+        drawCachedGlowRect(ctx,idleGlowCache,1,1,canvas.width-2,canvas.height-2,'#df4e1e',8,2,[6,4]);
       }
       requestAnimationFrame(updateCanvas);
     }
@@ -769,6 +793,7 @@
     document.documentElement.appendChild(canvas);
     const ctx=canvas.getContext('2d'); let dashOffset=0;
     let lastCropDraw=0;
+    const glowCache={}; // persists across frames — see drawCachedGlowRect
     function draw(ts) {
       if(!recording){canvas.remove();return;}
       if(document.hidden||ts-lastCropDraw<33){requestAnimationFrame(draw);return;} // ~30fps, skip when tab backgrounded
@@ -785,8 +810,10 @@
       if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch;}
       ctx.clearRect(0,0,canvas.width,canvas.height);
       const cx=rx-cLeft, cy=ry-cTop;
-      ctx.shadowColor='#df4e1e'; ctx.shadowBlur=10; ctx.strokeStyle='#df4e1e'; ctx.lineWidth=2; ctx.setLineDash([]);
-      ctx.strokeRect(cx,cy,rw2,rh2); ctx.shadowBlur=0;
+      // Round to whole pixels before caching — getBoundingClientRect can jitter
+      // by sub-pixel fractions between otherwise-identical frames, which would
+      // otherwise bust the cache key every frame and defeat the point.
+      drawCachedGlowRect(ctx,glowCache,Math.round(cx),Math.round(cy),Math.round(rw2),Math.round(rh2),'#df4e1e',10,2);
       ctx.strokeStyle='rgba(255,255,255,0.8)'; ctx.lineWidth=1; ctx.setLineDash([6,4]);
       ctx.lineDashOffset=-dashOffset; ctx.strokeRect(cx+0.5,cy+0.5,rw2-1,rh2-1); ctx.setLineDash([]);
       dashOffset=(dashOffset+0.4)%10;
