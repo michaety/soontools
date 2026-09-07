@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.28
+// @version      1.5.29
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -626,6 +626,7 @@
       const old=clips.pop();
       if(old.blobUrl){URL.revokeObjectURL(old.blobUrl);old.blobUrl=null;}
       if(old.thumbUrl){URL.revokeObjectURL(old.thumbUrl);old.thumbUrl=null;}
+      if(old._previewFixedUrl){URL.revokeObjectURL(old._previewFixedUrl);old._previewFixedUrl=null;}
       document.querySelector(`[data-clip-id="${old.id}"]`)?.remove();
     }
     // Collapse all existing FULLY-BUILT cards (not processing placeholders) when a new clip arrives
@@ -899,6 +900,54 @@
     }
   }
 
+  // MediaRecorder's raw MP4/WebM output is a streaming-oriented container (moov
+  // often missing/trailing) that Chrome's plain <video src=blob> demuxer can
+  // refuse to play even though the bytes are perfectly valid — the same fast
+  // stream-copy remux that downloadClip already relies on (-movflags +faststart)
+  // fixes this. Run it once, automatically, before giving up on the preview.
+  async function repairPreview(clip,video) {
+    if(clip._previewRepairAttempted) return false;
+    clip._previewRepairAttempted = true;
+    ffmpegQueue = ffmpegQueue.then(()=>_runPreviewRepair(clip,video));
+    return ffmpegQueue;
+  }
+
+  async function _runPreviewRepair(clip,video) {
+    try{
+      if(!clip.blobUrl) return false;
+      const ff = await getOrLoadFFmpeg();
+      const win=(typeof unsafeWindow!=='undefined')?unsafeWindow:window;
+      const FFmpegLib=win.FFmpeg;
+      const{fetchFile}=FFmpegLib;
+      if(!fetchFile) return false;
+      const inputData=await fetchFile(clip.blobUrl);
+      ff.FS('writeFile','preview-input.webm',inputData);
+      const isWebm = clip.mimeType?.startsWith('video/webm');
+      const isAvc3 = clip.mimeType?.includes('avc3');
+      const codecArgs = isWebm
+        ? ['-c:v','libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k']
+        : ['-c','copy'];
+      const tagArgs = isAvc3 ? ['-tag:v','avc1'] : [];
+      try { await ff.run('-i','preview-input.webm',...codecArgs,...tagArgs,'-movflags','+faststart','-y','preview-output.mp4'); }
+      catch(e){ if(!e.message?.includes('exit(0)')) throw e; }
+      let outputData;
+      try{ outputData=ff.FS('readFile','preview-output.mp4'); }catch(e){ outputData=null; }
+      try{ff.FS('unlink','preview-input.webm');}catch{}
+      try{ff.FS('unlink','preview-output.mp4');}catch{}
+      if(!outputData||outputData.length<1000) return false;
+      if(clip._previewFixedUrl) URL.revokeObjectURL(clip._previewFixedUrl);
+      clip._previewFixedUrl = URL.createObjectURL(new Blob([outputData.buffer],{type:'video/mp4'}));
+      if(!video.isConnected) return false; // card was removed while we were working
+      video.src = clip._previewFixedUrl;
+      video.load();
+      return true;
+    }catch(e){
+      console.warn('[SOON CLIP] Preview repair failed:',e.message);
+      ffmpegCached=null; // failure may leave FFmpeg in a bad state
+      return false;
+    }
+  }
+
   function triggerDownload(blob,filename) {
     const url=URL.createObjectURL(blob), a=document.createElement('a');
     a.href=url; a.download=filename; a.click();
@@ -955,7 +1004,7 @@
     // Multi-cam toggle
     const mcRow=document.createElement('div'); mcRow.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;';
     const mcLbl=document.createElement('div');
-    mcLbl.innerHTML='<span style="font-size:10px;color:rgba(0,0,0,0.65);">Multi-cam mode</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">Record continuously across cam switches</div>';
+    mcLbl.innerHTML='<span style="font-size:10px;color:var(--base-dark-text,rgb(25,28,32));opacity:0.65;">Multi-cam mode</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">Record continuously across cam switches</div>';
     const mcBtn=document.createElement('button'); mcBtn.className='sc-toggle-btn';
     const mcOn=()=>localStorage.getItem('sc_multicam')==='1';
     const mcUpdate=()=>{mcBtn.textContent=mcOn()?'ON':'OFF';mcBtn.classList.toggle('sc-toggle-btn--on',mcOn());};
@@ -966,7 +1015,7 @@
     // Placement toggle — left panel vs chat sidebar
     const plRow=document.createElement('div'); plRow.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;';
     const plLbl=document.createElement('div');
-    plLbl.innerHTML='<span style="font-size:10px;color:rgba(0,0,0,0.65);">Position</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">Dock Clip on the left panel or by chat</div>';
+    plLbl.innerHTML='<span style="font-size:10px;color:var(--base-dark-text,rgb(25,28,32));opacity:0.65;">Position</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">Dock Clip on the left panel or by chat</div>';
     const plBtn=document.createElement('button'); plBtn.className='sc-toggle-btn'; plBtn.style.cssText='min-width:44px;';
     const plOn=()=>localStorage.getItem('sc_placement')==='chat';
     const plUpdate=()=>{plBtn.textContent=plOn()?'Right':'Left';plBtn.classList.toggle('sc-toggle-btn--on',plOn());};
@@ -987,7 +1036,7 @@
     const shortcutAbort = new AbortController();
     function makeShortcutRow(label,key){
       const row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px;';
-      const lbl=document.createElement('span'); lbl.style.cssText='font-size:10px;color:rgba(0,0,0,0.65);flex:1;'; lbl.textContent=label;
+      const lbl=document.createElement('span'); lbl.style.cssText='font-size:10px;color:var(--base-dark-text,rgb(25,28,32));opacity:0.65;flex:1;'; lbl.textContent=label;
       const btn=document.createElement('button'); btn.className='sc-toggle-btn'; btn.style.cssText='font-family:monospace;min-width:70px;';
       const getSaved=()=>localStorage.getItem(key)||'';
       btn.textContent=getSaved()||'None';
@@ -1361,6 +1410,7 @@
     hdr.querySelector('.sc-del-btn').addEventListener('click',()=>{
       URL.revokeObjectURL(clip.blobUrl); clip.blobUrl=null;
       if(clip.thumbUrl){URL.revokeObjectURL(clip.thumbUrl); clip.thumbUrl=null;}
+      if(clip._previewFixedUrl){URL.revokeObjectURL(clip._previewFixedUrl); clip._previewFixedUrl=null;}
       clips.splice(clips.findIndex(c=>c.id===clip.id),1);
       dragAbort.abort(); // clean up drag listeners
       card.remove();
@@ -1372,15 +1422,27 @@
     // video is visibility:hidden;height:0 until loadedmetadata fires
     // This keeps it in the DOM so Chrome loads the blob regardless of card expand state
     let videoErrorShown = false;
-    video.addEventListener('error',()=>{
+    function showPreviewUnavailable() {
       if(videoErrorShown) return; // don't show twice or loop
       videoErrorShown = true;
       if(loadingDiv.isConnected) loadingDiv.remove();
       const errDiv=document.createElement('div');
-      errDiv.style.cssText='padding:10px 6px;text-align:center;font-size:10px;color:rgba(0,0,0,0.45);background:rgba(0,0,0,0.05);border-radius:3px;margin-top:5px;';
+      errDiv.style.cssText='padding:10px 6px;text-align:center;font-size:10px;color:var(--base-dark-text,rgb(25,28,32));opacity:0.65;background:rgba(0,0,0,0.05);border-radius:3px;margin-top:5px;';
       errDiv.textContent='Preview unavailable — use Save MP4 to download';
       video.insertAdjacentElement('afterend',errDiv);
       video.style.visibility='hidden'; video.style.height='0'; video.style.margin='0';
+    }
+    video.addEventListener('error',()=>{
+      if(videoErrorShown) return;
+      if(!clip._previewRepairAttempted){
+        // loadedmetadata (still pending, {once:true}) will fire and reveal the
+        // video normally if the repaired file plays — only fall back to the
+        // static message if the repair itself fails.
+        if(loadingDiv.isConnected===false) body.insertBefore(loadingDiv,video);
+        repairPreview(clip,video).then(ok=>{ if(!ok) showPreviewUnavailable(); });
+        return;
+      }
+      showPreviewUnavailable();
     });
 
     const playBtn=body.querySelector('.sc-play-btn');
@@ -1506,6 +1568,7 @@
         font-family:var(--base-font-primary,sofia-pro-variable,sans-serif);
         border-radius:var(--radius-lg,8px);
         overflow:hidden;
+        flex-shrink:0;
         background:var(--base-light,#dddec4);
         background-image:var(--base-texture-panel,var(--base-texture-background));
         box-shadow:rgba(0,0,0,0.3) 0 1px 3px 0;
@@ -1549,7 +1612,7 @@
       #sc-clips-list::-webkit-scrollbar { width:4px; }
       #sc-clips-list::-webkit-scrollbar-track { background:transparent; }
       #sc-clips-list::-webkit-scrollbar-thumb { background:rgba(0,0,0,0.2);border-radius:2px; }
-      .sc-sublabel { font-size:9px;opacity:0.55;color:rgba(0,0,0,0.7); }
+      .sc-sublabel { font-size:9px;opacity:0.55;color:var(--base-dark-text,rgb(25,28,32)); }
       .sc-status--ok      { color:var(--base-secondary,#26b64b)!important;opacity:1!important; }
       .sc-status--err     { color:var(--base-primary,#df4e1e)!important;opacity:1!important; }
       .sc-status--loading { opacity:0.75!important; }
@@ -1570,8 +1633,8 @@
       .sc-card-hdr { display:flex;align-items:center;gap:6px;padding:5px 6px;cursor:default; }
       .sc-card-thumb { width:48px;height:27px;object-fit:cover;border-radius:var(--radius-sm,2px);flex-shrink:0;background:#000; }
       .sc-card-hdr-info { flex:1;min-width:0; }
-      .sc-clip-label { font-size:10px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;color:rgba(0,0,0,0.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block; }
-      .sc-card-toggle { font-size:11px;width:18px;height:18px;border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);background:var(--base-light,#dddec4);color:rgba(0,0,0,0.45);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1; }
+      .sc-clip-label { font-size:10px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;color:var(--base-dark-text,rgb(25,28,32));opacity:0.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block; }
+      .sc-card-toggle { font-size:11px;width:18px;height:18px;border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);background:var(--base-light,#dddec4);color:var(--base-dark-text,rgb(25,28,32));opacity:0.65;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1; }
       .sc-card-toggle:hover { background:var(--base-light-300,#c8c9a8); }
       .sc-card-body { padding:0 6px 6px;display:flex;flex-direction:column;gap:5px;border-top:1px solid rgba(0,0,0,0.08); }
       .sc-clip-video { width:100%;display:block;background:#000;height:180px;object-fit:cover;border-radius:var(--radius-sm,2px);margin-top:5px; }
@@ -1581,7 +1644,7 @@
       .sc-play-btn:hover { opacity:0.85; }
       .sc-mute-btn { font-size:11px;padding:2px 4px;background:var(--base-light,#dddec4);border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);cursor:pointer;flex-shrink:0;transition:background 0.1s;line-height:1; }
       .sc-mute-btn:hover { background:var(--base-light-300,#c8c9a8); }
-      .sc-skip-btn { font-size:10px;padding:2px 4px;background:var(--base-light,#dddec4);border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);color:rgba(0,0,0,0.6);cursor:pointer;flex-shrink:0;transition:background 0.1s; }
+      .sc-skip-btn { font-size:10px;padding:2px 4px;background:var(--base-light,#dddec4);border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);color:var(--base-dark-text,rgb(25,28,32));opacity:0.7;cursor:pointer;flex-shrink:0;transition:background 0.1s; }
       .sc-skip-btn:hover { background:var(--base-light-300,#c8c9a8); }
       .sc-time-display { font-size:9px;opacity:0.5;font-family:monospace;flex-shrink:0; }
 
@@ -1596,15 +1659,15 @@
       .sc-trim-times { display:flex;justify-content:space-between;padding:0 1px; }
 
       .sc-card-actions { display:flex;justify-content:space-between;align-items:center;gap:6px; }
-      .sc-qbtn { padding:2px 5px;font-size:9px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;letter-spacing:0.04em;text-transform:uppercase;background:var(--base-light,#dddec4);border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);color:rgba(0,0,0,0.6);cursor:pointer;transition:background 0.1s; }
+      .sc-qbtn { padding:2px 5px;font-size:9px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;letter-spacing:0.04em;text-transform:uppercase;background:var(--base-light,#dddec4);border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);color:var(--base-dark-text,rgb(25,28,32));opacity:0.7;cursor:pointer;transition:background 0.1s; }
       .sc-qbtn:hover { background:var(--base-light-300,#c8c9a8); }
       .sc-dl-btn { padding:4px 10px;font-size:10px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;letter-spacing:0.04em;text-transform:uppercase;background:var(--base-primary,#df4e1e);border:none;border-radius:var(--radius-sm,3px);color:white;cursor:pointer;transition:opacity 0.1s; }
       .sc-dl-btn:hover { opacity:0.85; }
       .sc-dl-btn-sm { padding:2px 6px;font-size:9px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;background:var(--base-primary,#df4e1e);border:none;border-radius:var(--radius-sm,3px);color:white;cursor:pointer;transition:opacity 0.1s; }
       .sc-dl-btn-sm:hover { opacity:0.85; }
-      .sc-del-btn { padding:2px 6px;font-size:10px;background:var(--base-light,#dddec4);border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);color:rgba(0,0,0,0.45);cursor:pointer;transition:background 0.1s; }
-      .sc-del-btn:hover { background:rgba(223,78,30,0.15);color:var(--base-primary,#df4e1e); }
-      .sc-clip-status { font-size:9px;color:rgba(0,0,0,0.45);padding:2px 0; }
+      .sc-del-btn { padding:2px 6px;font-size:10px;background:var(--base-light,#dddec4);border:1px solid rgba(0,0,0,0.2);border-radius:var(--radius-sm,3px);color:var(--base-dark-text,rgb(25,28,32));opacity:0.55;cursor:pointer;transition:background 0.1s; }
+      .sc-del-btn:hover { background:rgba(223,78,30,0.15);color:var(--base-primary,#df4e1e);opacity:1; }
+      .sc-clip-status { font-size:9px;color:var(--base-dark-text,rgb(25,28,32));opacity:0.55;padding:2px 0; }
 
     `);
   }
