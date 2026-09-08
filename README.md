@@ -28,7 +28,7 @@ Snipping tool–style video recorder for Fishtank Live. Record fullscreen or cro
 - Matches custom themes
 - Choose its location - Left or right side of screen
 
-[![Install](https://img.shields.io/badge/Install%20Now-v1.5.38-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js)
+[![Install](https://img.shields.io/badge/Install%20Now-v1.5.40-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js)
 
 ---
 
