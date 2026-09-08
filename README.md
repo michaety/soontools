@@ -25,6 +25,8 @@ Snipping tool–style video recorder for Fishtank Live. Record fullscreen or cro
 - Multicam Recordings
 - Keyboard Shortcuts
 - Download as MP4
+- Matches custom themes
+- Choose its location - Left or right side of screen
 
 [![Install](https://img.shields.io/badge/Install%20Now-v1.5.36-brightgreen?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/michaety/soontools/main/soon-tools-clipper.user.js)
 
