@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.34
+// @version      1.5.35
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -622,8 +622,11 @@
           // Split-clip: stop current and start fresh after it fully finalises
           console.log('[SOON CLIP] Cam split — new clip');
           stopRecording();
-          // Wait for onstop to complete before starting new session —
-          // prevents double audio connect from overlapping teardown/setup
+          // stopRecording() clears activeSession synchronously, so the actual
+          // wait for _onStop's audio teardown to finish (avoiding a double
+          // audio-connect) is this fixed 1s delay, not the check below — that
+          // check only guards against the user manually starting a new
+          // recording during this window.
           setTimeout(() => { if (!activeSession?.isActive) startRecording(); }, 1000);
         }
       }
@@ -697,6 +700,7 @@
       if(old.blobUrl){URL.revokeObjectURL(old.blobUrl);old.blobUrl=null;}
       if(old.thumbUrl){URL.revokeObjectURL(old.thumbUrl);old.thumbUrl=null;}
       if(old._previewFixedUrl){URL.revokeObjectURL(old._previewFixedUrl);old._previewFixedUrl=null;}
+      old._dragAbort?.abort(); // card's trim-handle drag listeners are on `document` — must abort even when evicted, not just manually deleted
       document.querySelector(`[data-clip-id="${old.id}"]`)?.remove();
     }
     // Collapse all existing FULLY-BUILT cards (not processing placeholders) when a new clip arrives
@@ -910,6 +914,48 @@
     return ffmpegQueue;
   }
 
+  // Shared by _runDownload and _runPreviewRepair — both stream-copy (or, for
+  // WebM, re-encode) the recorder's raw output into a clean, faststart MP4.
+  // Callers are always serialized through ffmpegQueue, so reusing fixed temp
+  // filenames across both call sites is safe (never runs concurrently).
+  async function remuxToMp4(ff, blobUrl, mimeType, trim) {
+    const win=(typeof unsafeWindow!=='undefined')?unsafeWindow:window;
+    const FFmpegLib=win.FFmpeg;
+    const{fetchFile}=FFmpegLib;
+    if(!fetchFile) throw new Error('fetchFile not found');
+    const inputData=await fetchFile(blobUrl);
+    ff.FS('writeFile','sc-input.webm',inputData); // named .webm for ffmpeg input regardless of container
+
+    // -ss before -i for input-level seeking (accurate keyframe seek with -c copy)
+    // Use -t (duration) instead of -to (absolute) since -ss before -i resets timestamps to 0
+    const seekArgs = trim ? ['-ss',trim.in.toFixed(3)] : [];
+    const durArgs  = trim ? ['-t',(trim.out-trim.in).toFixed(3)] : [];
+    // Strategy per source codec:
+    //   avc1 MP4 → stream copy (fast, Twitter-compatible)
+    //   avc3 MP4 → stream copy + tag as avc1 (fast, fixes Twitter rejection)
+    //   WebM VP8/VP9 → full H.264 re-encode (slow but necessary)
+    const isWebm = mimeType?.startsWith('video/webm');
+    const isAvc3 = mimeType?.includes('avc3');
+    const codecArgs = isWebm
+      ? ['-c:v','libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p',
+         '-c:a','aac','-b:a','128k']
+      : ['-c','copy'];
+    // avc3 is bitstream-identical to avc1 — just tag it as avc1 for Twitter
+    const tagArgs = isAvc3 ? ['-tag:v','avc1'] : [];
+    try {
+      await ff.run(...seekArgs,'-i','sc-input.webm',...durArgs,...codecArgs,...tagArgs,'-movflags','+faststart','-y','sc-output.mp4');
+    } catch(e) {
+      if(!e.message?.includes('exit(0)')) throw e;
+    }
+
+    let outputData;
+    try{ outputData=ff.FS('readFile','sc-output.mp4'); }catch(e){ outputData=null; }
+    try{ff.FS('unlink','sc-input.webm');}catch{}
+    try{ff.FS('unlink','sc-output.mp4');}catch{}
+    if(!outputData||outputData.length<1000) throw new Error('MP4 conversion failed — try again');
+    return outputData;
+  }
+
   async function _runDownload(clip) {
     const needsTrim=clip.trimIn>0.1||clip.trimOut<clip.duration-0.1;
     // Animated progress bar — fills over estimated duration, no extra CPU
@@ -924,49 +970,9 @@
     try{
       if(!clip.blobUrl) throw new Error('Clip was deleted before conversion could start');
       const ff = await getOrLoadFFmpeg();
-      const win=(typeof unsafeWindow!=='undefined')?unsafeWindow:window;
-      const FFmpegLib=win.FFmpeg;
-      const{fetchFile}=FFmpegLib;
-      if(!fetchFile) throw new Error('fetchFile not found');
-      const inputData=await fetchFile(clip.blobUrl);
-      ff.FS('writeFile','input.webm',inputData); // named .webm for ffmpeg input regardless of container
-
-      async function runFFmpeg(args) {
-        try { await ff.run(...args); } catch(e) {
-          if(!e.message?.includes('exit(0)')) throw e;
-        }
-      }
-
-      // -ss before -i for input-level seeking (accurate keyframe seek with -c copy)
-      // Use -t (duration) instead of -to (absolute) since -ss before -i resets timestamps to 0
-      const seekArgs = needsTrim ? ['-ss',clip.trimIn.toFixed(3)] : [];
-      const durArgs  = needsTrim ? ['-t',(clip.trimOut-clip.trimIn).toFixed(3)] : [];
-      // Strategy per source codec:
-      //   avc1 MP4 → stream copy (fast, Twitter-compatible)
-      //   avc3 MP4 → stream copy + tag as avc1 (fast, fixes Twitter rejection)
-      //   WebM VP8/VP9 → full H.264 re-encode (slow but necessary)
-      const isWebm = clip.mimeType?.startsWith('video/webm');
-      const isAvc3 = clip.mimeType?.includes('avc3');
-      const codecArgs = isWebm
-        ? ['-c:v','libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p',
-           '-c:a','aac','-b:a','128k']
-        : ['-c','copy'];
-      // avc3 is bitstream-identical to avc1 — just tag it as avc1 for Twitter
-      const tagArgs = isAvc3 ? ['-tag:v','avc1'] : [];
-      await runFFmpeg([
-        ...seekArgs,'-i','input.webm',...durArgs,
-        ...codecArgs,...tagArgs,
-        '-movflags','+faststart','-y','output.mp4'
-      ]);
-
-      let outputData;
-      try{ outputData=ff.FS('readFile','output.mp4'); }catch(e){ outputData=null; }
-      if(!outputData||outputData.length<1000) throw new Error('MP4 conversion failed — try again');
+      const outputData = await remuxToMp4(ff,clip.blobUrl,clip.mimeType,needsTrim?{in:clip.trimIn,out:clip.trimOut}:null);
       triggerDownload(new Blob([outputData.buffer],{type:'video/mp4'}),clip.filename.replace(/\.\w+$/,'.mp4'));
       updateClipStatus(clip.id,'✓ Saved as MP4');
-      // Clean up wasm FS
-      try{ff.FS('unlink','input.webm');}catch{}
-      try{ff.FS('unlink','output.mp4');}catch{}
     }catch(err){
       console.warn('[SOON CLIP] FFmpeg failed:',err.message);
       // Discard cached instance — any failure may leave FFmpeg in a bad state
@@ -995,25 +1001,7 @@
     try{
       if(!clip.blobUrl) return false;
       const ff = await getOrLoadFFmpeg();
-      const win=(typeof unsafeWindow!=='undefined')?unsafeWindow:window;
-      const FFmpegLib=win.FFmpeg;
-      const{fetchFile}=FFmpegLib;
-      if(!fetchFile) return false;
-      const inputData=await fetchFile(clip.blobUrl);
-      ff.FS('writeFile','preview-input.webm',inputData);
-      const isWebm = clip.mimeType?.startsWith('video/webm');
-      const isAvc3 = clip.mimeType?.includes('avc3');
-      const codecArgs = isWebm
-        ? ['-c:v','libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k']
-        : ['-c','copy'];
-      const tagArgs = isAvc3 ? ['-tag:v','avc1'] : [];
-      try { await ff.run('-i','preview-input.webm',...codecArgs,...tagArgs,'-movflags','+faststart','-y','preview-output.mp4'); }
-      catch(e){ if(!e.message?.includes('exit(0)')) throw e; }
-      let outputData;
-      try{ outputData=ff.FS('readFile','preview-output.mp4'); }catch(e){ outputData=null; }
-      try{ff.FS('unlink','preview-input.webm');}catch{}
-      try{ff.FS('unlink','preview-output.mp4');}catch{}
-      if(!outputData||outputData.length<1000) return false;
+      const outputData = await remuxToMp4(ff,clip.blobUrl,clip.mimeType,null);
       if(clip._previewFixedUrl) URL.revokeObjectURL(clip._previewFixedUrl);
       clip._previewFixedUrl = URL.createObjectURL(new Blob([outputData.buffer],{type:'video/mp4'}));
       if(!video.isConnected) return false; // card was removed while we were working
@@ -1085,9 +1073,10 @@
     // iOS-style on/off switch — used for the two boolean settings below.
     // (Keyboard-shortcut capture buttons further down show text, not a bool,
     // so they keep the plain .sc-toggle-btn chrome instead of this.)
-    function buildSwitch(checked,onChange){
+    function buildSwitch(checked,onChange,ariaLabel){
       const label=document.createElement('label'); label.className='sc-switch';
       const input=document.createElement('input'); input.type='checkbox'; input.checked=checked;
+      if(ariaLabel) input.setAttribute('aria-label',ariaLabel); // adjacent text isn't <label>-associated, so screen readers need this explicitly
       const track=document.createElement('span'); track.className='sc-switch-track';
       label.appendChild(input); label.appendChild(track);
       label.addEventListener('click',e=>e.stopPropagation());
@@ -1099,7 +1088,7 @@
     const mcRow=document.createElement('div'); mcRow.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;';
     const mcLbl=document.createElement('div');
     mcLbl.innerHTML='<span style="font-size:10px;color:var(--base-dark-text,rgb(25,28,32));opacity:0.65;">Multi-cam mode</span><div style="font-size:9px;opacity:0.45;margin-top:1px;">Record continuously across cam switches</div>';
-    const mcSwitch=buildSwitch(localStorage.getItem('sc_multicam')==='1',checked=>{localStorage.setItem('sc_multicam',checked?'1':'0');});
+    const mcSwitch=buildSwitch(localStorage.getItem('sc_multicam')==='1',checked=>{localStorage.setItem('sc_multicam',checked?'1':'0');},'Multi-cam mode');
     mcRow.appendChild(mcLbl); mcRow.appendChild(mcSwitch); panel.appendChild(mcRow);
 
     // Placement toggle — left panel vs chat sidebar. Switch ON = docked left.
@@ -1111,7 +1100,7 @@
       // Re-inject at new position
       root.remove();
       reinject();
-    });
+    },'Left side placement');
     plRow.appendChild(plLbl); plRow.appendChild(plSwitch); panel.appendChild(plRow);
 
     const sep=document.createElement('div'); sep.style.cssText='border-top:1px solid rgba(0,0,0,0.1);margin:8px 0 6px;'; panel.appendChild(sep);
@@ -1312,7 +1301,8 @@
         });
 
         showStatus('Click ⏺ to record • 📷 to screenshot','');
-        console.log('[SOON CLIP] UI injected v1.5.3');
+        // Read live from the manifest rather than a hardcoded string that drifts out of sync on every version bump
+        console.log('[SOON CLIP] UI injected v'+(typeof GM_info!=='undefined'?GM_info.script.version:'?'));
       });
     }
 
@@ -1472,8 +1462,12 @@
 
     card.appendChild(hdr); card.appendChild(body);
 
-    // Declare dragAbort here so it's in scope for the del button listener below
+    // Declare dragAbort here so it's in scope for the del button listener below.
+    // Stashed on the clip too — the trim handles' mousemove/mouseup listeners
+    // are on `document`, so the 5-clip eviction cap in finaliseClip must abort
+    // this even when a card is silently evicted rather than manually deleted.
     const dragAbort = new AbortController();
+    clip._dragAbort = dragAbort;
 
     hdr.querySelector('.sc-card-toggle').addEventListener('click',()=>{
       const open=body.style.display!=='none';
@@ -1630,8 +1624,6 @@
       updateTrim();
     },{signal:dragAbort.signal});
     document.addEventListener('mouseup',()=>{drag=null;},{signal:dragAbort.signal});
-    // Clean up global listeners when card is deleted
-    hdr.querySelector('.sc-del-btn').addEventListener('click',()=>dragAbort.abort(),{once:true});
 
     body.querySelectorAll('.sc-qbtn[data-sec]').forEach(btn=>btn.addEventListener('click',()=>{clip.trimOut=Math.min(clip.duration,clip.trimIn+parseInt(btn.dataset.sec));updateTrim();video.currentTime=clip.trimIn;}));
     body.querySelector('.sc-qbtn-reset').addEventListener('click',()=>{clip.trimIn=0;clip.trimOut=clip.duration;updateTrim();});
