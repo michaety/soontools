@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.37
+// @version      1.5.38
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1283,8 +1283,18 @@
           }
         });
 
-        let collapsed=false;
-        document.getElementById('sc-toggle').addEventListener('click',()=>{collapsed=!collapsed;body.style.display=collapsed?'none':'';document.getElementById('sc-toggle').classList.toggle('sc-collapsed',collapsed);});
+        // Chat placement sits in-flow directly above the chat card in a column
+        // that has no scroll of its own — any height we add there permanently
+        // steals from chat's fixed vertical budget, with no way to scroll back
+        // down to reach it (confirmed: even a capped clip list still pushed
+        // chat's message input below the fold). Left placement doesn't have
+        // this problem (the site's own column scrolls), so only default to
+        // collapsed in chat mode. Recording/screenshot buttons stay in the
+        // header either way — this only hides the clip list, not the controls.
+        const toggleBtn=document.getElementById('sc-toggle');
+        let collapsed=root.classList.contains('sc-placement-chat');
+        if(collapsed){ body.style.display='none'; toggleBtn.classList.add('sc-collapsed'); }
+        toggleBtn.addEventListener('click',()=>{collapsed=!collapsed;body.style.display=collapsed?'none':'';toggleBtn.classList.toggle('sc-collapsed',collapsed);});
 
         document.getElementById('sc-ss-full').addEventListener('click',()=>takeScreenshot(null));
         document.getElementById('sc-ss-crop').addEventListener('click',()=>enterCropScreenshot());
