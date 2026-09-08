@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.35
+// @version      1.5.36
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1174,7 +1174,7 @@
       hdr.innerHTML=`
         <span class="sc-hdr-title">Clip</span>
         <span id="sc-rec-indicator" class="sc-rec-indicator" style="display:none;"></span>
-        <div style="margin-left:auto;display:flex;gap:4px;align-items:center;">
+        <div style="margin-left:auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end;row-gap:4px;">
           <div class="sc-btn-group">
             <button id="sc-ss-full" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Screenshot">${ICON_SCREENSHOT}</button>
             <button id="sc-ss-crop" class="sc-icon-btn ${NATIVE_DARK_BTN}" title="Crop screenshot">${ICON_CROP_SCREENSHOT}</button>
@@ -1664,7 +1664,10 @@
         border-bottom-color:color-mix(in srgb,var(--base-light,#dddec4) 80%,white);
         border-right-color:color-mix(in srgb,var(--base-light,#dddec4) 80%,white);
       }
-      .sc-hdr { display:flex;align-items:center;padding:4px;gap:5px;min-height:41px;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,0.15);box-shadow:rgba(255,255,255,0.5) 0 1px 0;user-select:none; }
+      /* flex-wrap so the icon buttons drop to a second row instead of spilling
+         past the card edge when the host page is too narrow/zoomed to fit them
+         on one line (seen on the site's own panels too at high browser zoom). */
+      .sc-hdr { display:flex;align-items:center;flex-wrap:wrap;padding:4px;gap:5px;min-height:41px;box-sizing:border-box;border-bottom:1px solid rgba(0,0,0,0.15);box-shadow:rgba(255,255,255,0.5) 0 1px 0;user-select:none; }
       .sc-hdr-title { font-family:var(--base-font-primary,sofia-pro-variable,sans-serif);font-size:14px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;line-height:1.5;color:var(--base-dark-text,rgb(25,28,32)); }
       .sc-rec-indicator { font-size:10px;font-weight:700;font-variation-settings:"slnt" 0,"wght" 700;color:var(--base-primary,#df4e1e);letter-spacing:0.05em; }
 
