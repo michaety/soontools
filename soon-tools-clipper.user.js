@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.36
+// @version      1.5.37
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1705,6 +1705,11 @@
       #sc-body { background:transparent; }
       .sc-inner { padding:4px;display:flex;flex-direction:column;gap:8px; }
       #sc-clips-list { max-height:520px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(0,0,0,0.2) transparent; }
+      /* Chat placement sits in-flow above the chat card rather than in its own
+         scrolling column, so a tall clip list pushes chat (and its message
+         input) straight out of the viewport. Cap it much shorter there — it
+         scrolls internally instead, so chat always stays reachable below it. */
+      #sc-root.sc-placement-chat #sc-clips-list { max-height:260px; }
       #sc-clips-list::-webkit-scrollbar { width:4px; }
       #sc-clips-list::-webkit-scrollbar-track { background:transparent; }
       #sc-clips-list::-webkit-scrollbar-thumb { background:rgba(0,0,0,0.2);border-radius:2px; }
