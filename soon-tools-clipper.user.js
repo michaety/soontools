@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.39
+// @version      1.5.40
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1202,18 +1202,6 @@
       // on-screen position — the column slides in from off-screen on load, so a
       // bounding-rect check can catch it mid-animation and wrongly conclude it
       // isn't there yet.
-      // Scrolls the chat card's outer wrapper to its bottom so the message
-      // input stays visible after our panel's height changes (initial inject,
-      // collapse/expand toggle). rAF twice: once for this frame's layout to
-      // settle, once more in case the site's own chat-open animation is still
-      // running (its height keeps changing for a few frames after mount).
-      function keepChatInputVisible(scrollHost) {
-        requestAnimationFrame(()=>{
-          scrollHost.scrollTop=scrollHost.scrollHeight;
-          requestAnimationFrame(()=>{ scrollHost.scrollTop=scrollHost.scrollHeight; });
-        });
-      }
-
       function findLeftPanel() {
         const ftfpMap=document.getElementById('ftfp-map');
         if(ftfpMap?.parentElement) return ftfpMap.parentElement;
@@ -1247,18 +1235,24 @@
           if(insertBefore){
             root.classList.add('sc-placement-chat');
             insertBefore.insertAdjacentElement('beforebegin',root);
-            // The chat card's own outer wrapper is a fixed-height box
-            // (height:calc(100%-108px)) with overflow:visible — it was never
-            // designed to scroll, so any extra height we add inside it (our
-            // panel) just overflows silently past its bottom edge, pushing
-            // the message input below the viewport with no way back. Make it
-            // scrollable and keep it scrolled to the bottom so the input
-            // stays reachable regardless of how tall our panel gets.
-            const scrollHost=insertBefore.parentElement?.parentElement;
-            if(scrollHost && getComputedStyle(scrollHost).position==='fixed'){
-              scrollHost.style.overflowY='auto';
-              root._chatScrollHost=scrollHost;
-              keepChatInputVisible(scrollHost);
+            // insertBefore (chat's own flex column: header + messages + input,
+            // all already correctly built with flex:1/min-height:0 so messages
+            // shrink first) sits in a plain *block* parent with insertBefore
+            // itself sized to a rigid height:100%. Block layout doesn't let
+            // siblings negotiate space, so adding our panel as a sibling just
+            // piles on top of that fixed 100%, overflowing the card with no
+            // way to reach the input. Making the shared parent a flex column
+            // and letting insertBefore flex/shrink instead of demanding 100%
+            // hooks our panel into that same existing shrink cascade — chat
+            // shows fewer messages instead of losing its input off-screen.
+            const chatCard=insertBefore.parentElement;
+            if(chatCard){
+              chatCard.style.display='flex';
+              chatCard.style.flexDirection='column';
+              insertBefore.style.flex='1 1 auto';
+              insertBefore.style.height='auto';
+              insertBefore.style.minHeight='0';
+              root.style.flexShrink='0';
             }
             cb(); startRejectionWatcher(insertBefore.parentElement||document.body,true); return;
           }
@@ -1308,23 +1302,9 @@
           }
         });
 
-        // Chat placement sits in-flow directly above the chat card in a column
-        // that has no scroll of its own — any height we add there permanently
-        // steals from chat's fixed vertical budget, with no way to scroll back
-        // down to reach it (confirmed: even a capped clip list still pushed
-        // chat's message input below the fold). Left placement doesn't have
-        // this problem (the site's own column scrolls), so only default to
-        // collapsed in chat mode. Recording/screenshot buttons stay in the
-        // header either way — this only hides the clip list, not the controls.
         const toggleBtn=document.getElementById('sc-toggle');
-        let collapsed=root.classList.contains('sc-placement-chat');
-        if(collapsed){ body.style.display='none'; toggleBtn.classList.add('sc-collapsed'); }
-        toggleBtn.addEventListener('click',()=>{
-          collapsed=!collapsed;
-          body.style.display=collapsed?'none':'';
-          toggleBtn.classList.toggle('sc-collapsed',collapsed);
-          if(root._chatScrollHost) keepChatInputVisible(root._chatScrollHost);
-        });
+        let collapsed=false;
+        toggleBtn.addEventListener('click',()=>{collapsed=!collapsed;body.style.display=collapsed?'none':'';toggleBtn.classList.toggle('sc-collapsed',collapsed);});
 
         document.getElementById('sc-ss-full').addEventListener('click',()=>takeScreenshot(null));
         document.getElementById('sc-ss-crop').addEventListener('click',()=>enterCropScreenshot());
