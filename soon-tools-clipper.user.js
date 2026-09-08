@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Soon Clipper
 // @namespace    https://fishtank.news
-// @version      1.5.38
+// @version      1.5.39
 // @description  Snipping tool style video recorder for fishtank.live — fishtank.news
 // @author       fishtank.news
 // @match        https://www.fishtank.live/*
@@ -1202,6 +1202,18 @@
       // on-screen position — the column slides in from off-screen on load, so a
       // bounding-rect check can catch it mid-animation and wrongly conclude it
       // isn't there yet.
+      // Scrolls the chat card's outer wrapper to its bottom so the message
+      // input stays visible after our panel's height changes (initial inject,
+      // collapse/expand toggle). rAF twice: once for this frame's layout to
+      // settle, once more in case the site's own chat-open animation is still
+      // running (its height keeps changing for a few frames after mount).
+      function keepChatInputVisible(scrollHost) {
+        requestAnimationFrame(()=>{
+          scrollHost.scrollTop=scrollHost.scrollHeight;
+          requestAnimationFrame(()=>{ scrollHost.scrollTop=scrollHost.scrollHeight; });
+        });
+      }
+
       function findLeftPanel() {
         const ftfpMap=document.getElementById('ftfp-map');
         if(ftfpMap?.parentElement) return ftfpMap.parentElement;
@@ -1235,6 +1247,19 @@
           if(insertBefore){
             root.classList.add('sc-placement-chat');
             insertBefore.insertAdjacentElement('beforebegin',root);
+            // The chat card's own outer wrapper is a fixed-height box
+            // (height:calc(100%-108px)) with overflow:visible — it was never
+            // designed to scroll, so any extra height we add inside it (our
+            // panel) just overflows silently past its bottom edge, pushing
+            // the message input below the viewport with no way back. Make it
+            // scrollable and keep it scrolled to the bottom so the input
+            // stays reachable regardless of how tall our panel gets.
+            const scrollHost=insertBefore.parentElement?.parentElement;
+            if(scrollHost && getComputedStyle(scrollHost).position==='fixed'){
+              scrollHost.style.overflowY='auto';
+              root._chatScrollHost=scrollHost;
+              keepChatInputVisible(scrollHost);
+            }
             cb(); startRejectionWatcher(insertBefore.parentElement||document.body,true); return;
           }
         }
@@ -1294,7 +1319,12 @@
         const toggleBtn=document.getElementById('sc-toggle');
         let collapsed=root.classList.contains('sc-placement-chat');
         if(collapsed){ body.style.display='none'; toggleBtn.classList.add('sc-collapsed'); }
-        toggleBtn.addEventListener('click',()=>{collapsed=!collapsed;body.style.display=collapsed?'none':'';toggleBtn.classList.toggle('sc-collapsed',collapsed);});
+        toggleBtn.addEventListener('click',()=>{
+          collapsed=!collapsed;
+          body.style.display=collapsed?'none':'';
+          toggleBtn.classList.toggle('sc-collapsed',collapsed);
+          if(root._chatScrollHost) keepChatInputVisible(root._chatScrollHost);
+        });
 
         document.getElementById('sc-ss-full').addEventListener('click',()=>takeScreenshot(null));
         document.getElementById('sc-ss-crop').addEventListener('click',()=>enterCropScreenshot());
