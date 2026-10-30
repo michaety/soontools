@@ -2,7 +2,7 @@
 
 > Tampermonkey userscripts for [fishtank.live](https://www.fishtank.live) — built by [soon](https://x.com/emty_h3v) @ [fishtank.news](https://fishtank.news)
 
-Soon Tools is split into two independent scripts. Install one or both.
+Soon Tools is a Tampermonkey userscript for clipping Fishtank Live.
 
 ---
 
@@ -34,7 +34,7 @@ Snipping tool–style video recorder for Fishtank Live. Record fullscreen or cro
 
 ## 🗺️ Soon Map *(discontinued)*
 
-Soon Map has been deprecated and is no longer maintained. If you have it installed, it will prompt you to uninstall.
+Soon Map has been discontinued and is no longer maintained. If you still have it installed, it shows a banner asking you to uninstall it.
 
 ---
 
@@ -49,13 +49,15 @@ Soon Map has been deprecated and is no longer maintained. If you have it install
 | Edge    | [Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd) |
 | Safari  | [App Store](https://apps.apple.com/us/app/tampermonkey/id1482490089) |
 
-### 2. Install the scripts you want
+**On Chrome, Edge and other Chromium browsers**, also turn on **Allow User Scripts**: right-click the Tampermonkey icon → **Manage extension**, then switch on **Allow User Scripts** (on older versions, switch on **Developer mode** at the top of `chrome://extensions` instead). Without it, the script installs but never runs.
 
-Click the install buttons above — Tampermonkey will open a confirmation dialog.
+### 2. Install Soon Clipper
+
+Click the install button above — Tampermonkey will open a confirmation dialog.
 
 ### 3. Use it
 
-Navigate to [fishtank.live](https://www.fishtank.live) — Soon Tools appears automatically in the left panel.
+Navigate to [fishtank.live](https://www.fishtank.live) — Soon Clipper appears automatically at the side of the screen (left or right, set in its settings).
 
 ---
 
